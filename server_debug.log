@@ -1,0 +1,115 @@
+Loaded API route: /api/agent
+Loaded API route: /api/auth
+⚠️  Node.js 18 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 20 or later. For more information, visit: https://github.com/orgs/supabase/discussions/37217
+Loaded API route: /api/business-panel
+Loaded API route: /api/env-test
+Loaded API route: /api/gpt
+Loaded API route: /api/health
+Loaded API route: /api/order-routing
+Loaded API route: /api/places
+Loaded API route: /api/tts
+Loaded API route: /api/whisper
+Backend server running on http://localhost:3006
+Available endpoints:
+  - /api/agent
+  - /api/auth
+  - /api/business-panel
+  - /api/env-test
+  - /api/gpt
+  - /api/health
+  - /api/order-routing
+  - /api/places
+  - /api/tts
+  - /api/whisper
+Fetching profile for user_id: 66051f90-6486-4ce3-b771-f51d3d39a8e9
+Profile query result: {
+  profile: {
+    id: '66051f90-6486-4ce3-b771-f51d3d39a8e9',
+    email: 'ndoemo02@gmail.com',
+    user_type: 'business_owner',
+    business_role: 'owner',
+    business_id: '598e9568-1ff0-406f-9f41-a39a43f58cf4'
+  },
+  profileError: null
+}
+Business query result: {
+  business: {
+    id: '598e9568-1ff0-406f-9f41-a39a43f58cf4',
+    name: 'Testowa Pizzeria Demo',
+    address: 'ul. Testowa 123, 00-001 Warszawa',
+    city: 'Warszawa',
+    phone: '+48123456789',
+    is_active: true
+  },
+  businessError: null
+}
+Orders query result: { orders: 2, ordersError: null }
+Fetching profile for user_id: 66051f90-6486-4ce3-b771-f51d3d39a8e9
+Profile query result: {
+  profile: {
+    id: '66051f90-6486-4ce3-b771-f51d3d39a8e9',
+    email: 'ndoemo02@gmail.com',
+    user_type: 'business_owner',
+    business_role: 'owner',
+    business_id: '598e9568-1ff0-406f-9f41-a39a43f58cf4'
+  },
+  profileError: null
+}
+Business query result: {
+  business: {
+    id: '598e9568-1ff0-406f-9f41-a39a43f58cf4',
+    name: 'Testowa Pizzeria Demo',
+    address: 'ul. Testowa 123, 00-001 Warszawa',
+    city: 'Warszawa',
+    phone: '+48123456789',
+    is_active: true
+  },
+  businessError: null
+}
+Orders query result: { orders: 3, ordersError: null }
+Fetching profile for user_id: 66051f90-6486-4ce3-b771-f51d3d39a8e9
+Profile query result: {
+  profile: {
+    id: '66051f90-6486-4ce3-b771-f51d3d39a8e9',
+    email: 'ndoemo02@gmail.com',
+    user_type: 'business_owner',
+    business_role: 'owner',
+    business_id: '598e9568-1ff0-406f-9f41-a39a43f58cf4'
+  },
+  profileError: null
+}
+Business query result: {
+  business: {
+    id: '598e9568-1ff0-406f-9f41-a39a43f58cf4',
+    name: 'Testowa Pizzeria Demo',
+    address: 'ul. Testowa 123, 00-001 Warszawa',
+    city: 'Warszawa',
+    phone: '+48123456789',
+    is_active: true
+  },
+  businessError: null
+}
+Orders query result: { orders: 3, ordersError: null }
+Fetching profile for user_id: 66051f90-6486-4ce3-b771-f51d3d39a8e9
+Profile query result: {
+  profile: {
+    id: '66051f90-6486-4ce3-b771-f51d3d39a8e9',
+    email: 'ndoemo02@gmail.com',
+    user_type: 'business_owner',
+    business_role: 'owner',
+    business_id: '598e9568-1ff0-406f-9f41-a39a43f58cf4'
+  },
+  profileError: null
+}
+Business query result: {
+  business: {
+    id: '598e9568-1ff0-406f-9f41-a39a43f58cf4',
+    name: 'Testowa Pizzeria Demo',
+    address: 'ul. Testowa 123, 00-001 Warszawa',
+    city: 'Warszawa',
+    phone: '+48123456789',
+    is_active: true
+  },
+  businessError: null
+}
+Orders query result: { orders: 4, ordersError: null }
