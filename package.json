@@ -1,14 +1,12 @@
 {
-  "type": "module"
-}
   "name": "freeflow-backend-vercel",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Serverless backend for FreeFlow (Vercel)",
+  "description": "Serverless backend",
   "license": "MIT",
   "engines": {
-    "node": ">=18.17"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "vercel dev --listen 3001",
@@ -17,9 +15,8 @@
   },
   "dependencies": {
     "openai": "^4.56.0",
-    "@supabase/supabase-js": "^2.43.4"
-  },
-  "devDependencies": {
-    "express": "^5.1.0"
+    "@supabase/supabase-js": "^2.43.4",
+    "express": "^5.1.0",
+    "cors": "^2.8.5"
   }
 }
