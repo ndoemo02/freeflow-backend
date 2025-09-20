@@ -1,14 +1,9 @@
 // /api/tts.js
 // Serverless TTS (OpenAI tts-1) → MP3
+import { applyCors } from './cors.js';
+
 export default async function handler(req, res) {
-  // CORS
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    return res.status(204).end();
-  }
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (applyCors(req, res)) return;
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
