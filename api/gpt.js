@@ -1,4 +1,6 @@
-import { applyCors } from './cors.js';
+
+import { applyCors } from '../lib/cors.js';
+
 
 // /api/gpt.js
 // Asystent FreeFlow – krótkie odpowiedzi PL

@@ -1,6 +1,8 @@
 // /api/tts.js
 // Serverless TTS (OpenAI tts-1) → MP3
-import { applyCors } from './cors.js';
+
+import { applyCors } from '../lib/cors.js';
+
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;

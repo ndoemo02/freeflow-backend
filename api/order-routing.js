@@ -1,6 +1,8 @@
 // /api/order-routing.js — endpoint do kierowania zamówień do restauracji
 import { createClient } from '@supabase/supabase-js';
-import { applyCors } from './cors.js';
+
+import { applyCors } from '../lib/cors.js';
+
 
 const supabase = createClient(
   process.env.SUPABASE_URL,

@@ -1,4 +1,6 @@
-import { applyCors } from './cors.js';
+
+import { applyCors } from '../lib/cors.js';
+
 
 // /api/health.js
 export default async function handler(req, res) {
