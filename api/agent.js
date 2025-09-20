@@ -1,10 +1,8 @@
+import { applyCors } from './cors.js';
+
 // /api/agent.js  — lekki „planner” z Places + syntetyczne menu (fallback).
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin","*");
-  res.setHeader("Access-Control-Allow-Methods","GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers","Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.status(200).end();
+  if (applyCors(req, res)) return;
 
   try {
     const body = req.method === "POST" ? (req.body || {}) : {};
