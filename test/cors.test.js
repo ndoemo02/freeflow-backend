@@ -86,20 +86,31 @@ try {
   });
 
   await run('whitelist allows configured origins', () => {
-    process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173,https://freeflow-front.vercel.app';
-    const req = createReq({ method: 'GET', origin: 'https://freeflow-front.vercel.app' });
+
+    process.env.CORS_ALLOWED_ORIGINS = 'https://freeflow-frontend.vercel.app,https://freeflo.vercel.app,http://localhost:5173';
+    const req = createReq({
+      method: 'GET',
+      origin: 'https://freeflow-frontend.vercel.app',
+    });
+
     const res = createRes();
 
     const handled = applyCors(req, res);
 
     assert.equal(handled, false);
+
+    assert.equal(
+      res.headers['Access-Control-Allow-Origin'],
+      'https://freeflow-frontend.vercel.app',
+    );
+
     assert.equal(res.headers['Access-Control-Allow-Origin'], 'https://freeflow-front.vercel.app');
     assert.equal(res.headers['Access-Control-Allow-Methods'], 'GET,POST,OPTIONS');
     assert.equal(res.headers['Access-Control-Allow-Headers'], 'Content-Type, Authorization');
   });
 
-  await run('whitelist blocks other origins', () => {
-    process.env.CORS_ALLOWED_ORIGINS = 'http://localhost:5173,https://freeflow-front.vercel.app';
+
+    process.env.CORS_ALLOWED_ORIGINS = 'https://freeflow-frontend.vercel.app,https://freeflo.vercel.app,http://localhost:5173';
     const req = createReq({ method: 'GET', origin: 'https://not-allowed.example' });
     const res = createRes();
 
@@ -110,6 +121,23 @@ try {
     assert.deepEqual(res.body, { error: 'Origin not allowed' });
     assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
   });
+
+  await run('backend vercel domain is rejected', () => {
+    process.env.CORS_ALLOWED_ORIGINS = 'https://freeflow-frontend.vercel.app,https://freeflo.vercel.app,http://localhost:5173';
+    const req = createReq({
+      method: 'GET',
+      origin: 'https://freeflow-backend-vercel.vercel.app',
+    });
+    const res = createRes();
+
+    const handled = applyCors(req, res);
+
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 403);
+    assert.deepEqual(res.body, { error: 'Origin not allowed' });
+    assert.equal(res.headers['Access-Control-Allow-Origin'], undefined);
+  });
+
 
   console.log('All CORS tests passed');
 } finally {

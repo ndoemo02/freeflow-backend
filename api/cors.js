@@ -1,5 +1,12 @@
+const defaultAllowedOrigins = [
+  'https://freeflow-frontend.vercel.app',
+  'https://freeflo.vercel.app',
+  'http://localhost:5173',
+];
+
 export function applyCors(req, res) {
-  const rawOrigins = process.env.CORS_ALLOWED_ORIGINS ?? '*';
+  const rawOrigins =
+    process.env.CORS_ALLOWED_ORIGINS ?? defaultAllowedOrigins.join(',');
   const allowedOrigins = rawOrigins
     .split(',')
     .map(origin => origin.trim())
