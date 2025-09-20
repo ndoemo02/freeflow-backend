@@ -1,4 +1,6 @@
+
 import { applyCors } from '../lib/cors.js';
+
 
 // szybka obsługa OPTIONS
 export default async function handler(req, res) {

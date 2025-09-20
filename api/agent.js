@@ -1,4 +1,6 @@
+
 import { applyCors } from '../lib/cors.js';
+
 
 // /api/agent.js  — lekki „planner” z Places + syntetyczne menu (fallback).
 export default async function handler(req, res) {

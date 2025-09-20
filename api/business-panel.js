@@ -1,6 +1,8 @@
 // /api/business-panel.js — endpoint dla paneli biznesowych
 import { createClient } from '@supabase/supabase-js';
+
 import { applyCors } from '../lib/cors.js';
+
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
