@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>DrWeb – Testowanie API Freeflow</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; background: #f7f7fa; }
+    h1 { color: #2a3a4a; }
+    form { background: #fff; padding: 1em; margin-bottom: 2em; border-radius: 8px; box-shadow: 0 2px 8px #0001; }
+    label { display: block; margin-top: 1em; }
+    input, button, textarea { font-size: 1em; margin-top: 0.3em; }
+    .result { background: #eef; padding: 0.5em; border-radius: 4px; margin-top: 0.5em; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>DrWeb – Testowanie API Freeflow</h1>
+
+  <form id="env-form" style="background:#eaf; margin-bottom:2em;">
+    <label><b>Środowisko backendu:</b>
+      <select id="env-select">
+        <option value="local">Lokalny (domyślny)</option>
+        <option value="remote">Zdalny (np. Vercel)</option>
+      </select>
+    </label>
+    <label id="remote-url-label" style="display:none; margin-left:1em;">
+      URL backendu:
+      <input type="url" id="remote-url" placeholder="https://twoja-apka.vercel.app">
+    </label>
+  </form>
+
+  <form id="auth-form">
+    <h2>Test /api/auth (logowanie)</h2>
+    <label>Email: <input type="email" name="email" value="ndoemo02@gmail.com" required></label>
+    <label>Hasło: <input type="password" name="password" value="abc123" required></label>
+    <button type="submit">Wyślij</button>
+    <div class="result" id="auth-result"></div>
+  </form>
+
+  <form id="whisper-form">
+    <h2>Test /api/whisper (transkrypcja audio)</h2>
+    <label>Plik audio (webm): <input type="file" name="audio" accept="audio/webm"></label>
+    <button type="submit">Wyślij</button>
+    <div class="result" id="whisper-result"></div>
+  </form>
+
+  <form id="health-form">
+    <h2>Test /api/health</h2>
+    <button type="submit">Sprawdź zdrowie</button>
+    <div class="result" id="health-result"></div>
+  </form>
+
+  <form id="tts-form">
+    <h2>Test /api/tts (text-to-speech)</h2>
+    <label>Tekst do przeczytania:<br>
+      <textarea name="text" rows="3" cols="50" required>To jest testowy tekst do syntezy mowy.</textarea>
+    </label>
+    <label>Głos:
+      <select name="voice">
+        <option value="alloy">alloy</option>
+        <option value="verse">verse</option>
+        <option value="coral">coral</option>
+        <option value="sage">sage</option>
+      </select>
+    </label>
+    <label>Format:
+      <select name="format">
+        <option value="mp3">mp3</option>
+        <option value="wav">wav</option>
+        <option value="opus">opus</option>
+        <option value="aac">aac</option>
+      </select>
+    </label>
+    <button type="submit">Wyślij</button>
+    <div class="result" id="tts-result"></div>
+  </form>
+
+  <form id="places-form">
+    <h2>Test /api/places (wyszukiwanie miejsc)</h2>
+    <label>Fraza (query): <input type="text" name="query" value="pizza" required></label>
+    <label>Lat (opcjonalnie): <input type="number" name="lat" step="any"></label>
+    <label>Lng (opcjonalnie): <input type="number" name="lng" step="any"></label>
+    <button type="submit">Wyślij</button>
+    <div class="result" id="places-result"></div>
+  </form>
+
+  <form id="agent-form">
+    <h2>Test /api/agent (planner AI)</h2>
+    <label>Tekst zapytania: <input type="text" name="text" value="Zamów pizzę pepperoni na 19:00" required></label>
+    <label>Lat (opcjonalnie): <input type="number" name="lat" step="any"></label>
+    <label>Lng (opcjonalnie): <input type="number" name="lng" step="any"></label>
+    <button type="submit">Wyślij</button>
+    <div class="result" id="agent-result"></div>
+  </form>
+
+  <script>
+    let apiBase = '';
+    const envSelect = document.getElementById('env-select');
+    const remoteUrlLabel = document.getElementById('remote-url-label');
+    const remoteUrlInput = document.getElementById('remote-url');
+
+    function updateApiBase() {
+      if (envSelect.value === 'remote') {
+        apiBase = remoteUrlInput.value?.replace(/\/$/, '') || '';
+      } else {
+        apiBase = '';
+      }
+    }
+
+    envSelect.onchange = () => {
+      remoteUrlLabel.style.display = envSelect.value === 'remote' ? '' : 'none';
+      updateApiBase();
+    };
+    remoteUrlInput.oninput = updateApiBase;
+
+    // Helper do fetchowania z wybraną bazą
+    function apiFetch(path, opts) {
+      return fetch((apiBase ? apiBase : '') + path, opts);
+    }
+
+    // /api/auth
+    document.getElementById('auth-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const email = form.email.value;
+      const password = form.password.value;
+      const result = document.getElementById('auth-result');
+      result.textContent = 'Czekaj...';
+      try {
+        const res = await apiFetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+
+    // /api/whisper
+    document.getElementById('whisper-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const file = form.audio.files[0];
+      const result = document.getElementById('whisper-result');
+      if (!file) {
+        result.textContent = 'Wybierz plik audio!';
+        return;
+      }
+      result.textContent = 'Czekaj...';
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await apiFetch('/api/whisper', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+
+    // /api/health
+    document.getElementById('health-form').onsubmit = async e => {
+      e.preventDefault();
+      const result = document.getElementById('health-result');
+      result.textContent = 'Czekaj...';
+      try {
+        const res = await apiFetch('/api/health');
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+
+    // /api/tts
+    document.getElementById('tts-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const text = form.text.value;
+      const voice = form.voice.value;
+      const format = form.format.value;
+      const result = document.getElementById('tts-result');
+      result.textContent = 'Czekaj...';
+      try {
+        const res = await apiFetch('/api/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice, format })
+        });
+        if (res.ok && res.headers.get('Content-Type')?.startsWith('audio/')) {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          result.innerHTML = `<audio controls src="${url}"></audio><br><a href="${url}" download="tts.${format}">Pobierz plik audio</a>`;
+        } else {
+          const data = await res.json();
+          result.textContent = JSON.stringify(data, null, 2);
+        }
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+
+    // /api/places
+    document.getElementById('places-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const query = form.query.value;
+      const lat = form.lat.value;
+      const lng = form.lng.value;
+      const params = new URLSearchParams({ query });
+      if (lat) params.append('lat', lat);
+      if (lng) params.append('lng', lng);
+      const result = document.getElementById('places-result');
+      result.textContent = 'Czekaj...';
+      try {
+        const res = await apiFetch('/api/places?' + params.toString());
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+
+    // /api/agent
+    document.getElementById('agent-form').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const text = form.text.value;
+      const lat = form.lat.value;
+      const lng = form.lng.value;
+      const body = { text };
+      if (lat) body.lat = Number(lat);
+      if (lng) body.lng = Number(lng);
+      const result = document.getElementById('agent-result');
+      result.textContent = 'Czekaj...';
+      try {
+        const res = await apiFetch('/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        result.textContent = 'Błąd: ' + err;
+      }
+    };
+  </script>
+</body>
+</html>

@@ -898,3 +898,8 @@
 # uploads/
 # downloads/
 
+/dist
+/assets/*.js
+/assets/*.js.map
+/assets/*.css
+/assets/*.css.map

@@ -1,17 +1,10 @@
-// --- CORS (wspólne)
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
+
+import { applyCors } from '../lib/cors.js';
+
 
 // szybka obsługa OPTIONS
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
-    return res.status(204).end();
-  }
-  Object.entries(CORS_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+  if (applyCors(req, res)) return;
 
   try {
     if (!process.env.GOOGLE_MAPS_API_KEY) {
