@@ -12,7 +12,7 @@
     "dev": "vercel dev --listen 3001",
     "build": "echo 'nothing to build'",
 
-    "test": "node --test test/cors.spec.mjs && node -e \"console.log('OK')\""
+    "test": "node --test server.cors.test.mjs"
 
   },
   "dependencies": {

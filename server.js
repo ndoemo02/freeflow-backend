@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -10,18 +11,61 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const server = createServer(app);
 
+const corsOptions = buildCorsOptions(process.env.CORS_ALLOWED_ORIGINS);
+
 // Middleware
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+  if (req.method === 'OPTIONS' && !res.headersSent) {
+    res.sendStatus(corsOptions.optionsSuccessStatus);
+    return;
   }
+
+  next();
 });
+
+function buildCorsOptions(allowedOriginsValue) {
+  const normalizedValue = typeof allowedOriginsValue === 'string' ? allowedOriginsValue.trim() : '';
+
+  const options = {
+    origin: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 200
+  };
+
+  if (!normalizedValue) {
+    return options;
+  }
+
+  if (normalizedValue === '*') {
+    return options;
+  }
+
+  const allowedOrigins = normalizedValue
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+
+  if (allowedOrigins.length === 0) {
+    return options;
+  }
+
+  const allowedOriginsSet = new Set(allowedOrigins);
+
+  return {
+    ...options,
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, allowedOriginsSet.has(origin));
+    }
+  };
+}
 
 // Load API routes dynamically
 const apiDir = path.join(__dirname, 'api');
@@ -65,11 +109,16 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3002;
-server.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log('Available endpoints:');
-  apiFiles.forEach(file => {
-    const routeName = path.basename(file, '.js');
-    console.log(`  - /api/${routeName}`);
+
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(PORT, () => {
+    console.log(`Backend server running on http://localhost:${PORT}`);
+    console.log('Available endpoints:');
+    apiFiles.forEach(file => {
+      const routeName = path.basename(file, '.js');
+      console.log(`  - /api/${routeName}`);
+    });
   });
-});
+}
+
+export { app };
