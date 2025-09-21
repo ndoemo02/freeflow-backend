@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "vercel dev --listen 3001",
     "build": "echo 'nothing to build'",
-    "test": "node -e \"console.log('OK')\""
+    "test": "node --test server.cors.test.mjs"
   },
   "dependencies": {
     "openai": "^4.56.0",
