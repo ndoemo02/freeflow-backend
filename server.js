@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import { createServer } from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -11,17 +12,42 @@ const app = express();
 const server = createServer(app);
 
 // Middleware
-app.use(express.json());
+const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+const allowedMethods = (process.env.CORS_ALLOWED_METHODS || 'GET,POST,PUT,PATCH,DELETE,OPTIONS')
+  .split(',')
+  .map(method => method.trim().toUpperCase())
+  .filter(Boolean);
+
+const allowedHeaders = (process.env.CORS_ALLOWED_HEADERS || '')
+  .split(',')
+  .map(header => header.trim())
+  .filter(Boolean);
+
+const allowCredentials = process.env.CORS_ALLOW_CREDENTIALS === 'true';
+
+const corsOptions = {
+  origin: allowedOrigins.length ? allowedOrigins : true,
+  credentials: allowCredentials,
+  methods: allowedMethods,
+  allowedHeaders: allowedHeaders.length ? allowedHeaders : undefined
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// Ensure responses always contain the negotiated CORS headers
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(200);
-  } else {
-    next();
+  if (allowCredentials) {
+    res.header('Access-Control-Allow-Credentials', 'true');
   }
+  next();
 });
+
+app.use(express.json());
 
 // Load API routes dynamically
 const apiDir = path.join(__dirname, 'api');
