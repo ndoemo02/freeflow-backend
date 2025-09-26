@@ -18,7 +18,8 @@ export default async function handler(req, res) {
         ? (req.body || {})
         : Object.fromEntries(new URLSearchParams(await readBody(req)));
 
-    const query = params.query || params.keyword || '';
+    // Accept multiple aliases: q | query | keyword
+    const query = params.q || params.query || params.keyword || '';
     const lat = parseFloat(params.lat);
     const lng = parseFloat(params.lng);
     const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
@@ -51,6 +52,13 @@ export default async function handler(req, res) {
         detectedType = googleType;
         break;
       }
+    }
+
+    if (!query) {
+      return res.status(400).json({
+        status: 'INVALID_REQUEST',
+        error: 'Missing query. Use ?q=... or ?query=...',
+      });
     }
 
     // Budujemy URL do Google Places
@@ -125,7 +133,32 @@ export default async function handler(req, res) {
       return res.status(502).json({ status: data.status, error: data.error_message || 'Upstream error' });
     }
 
-    const results = Array.isArray(data.results) ? data.results : [];
+    // --- dozwolone typy Google Places (filtr)
+    const allowedTypes = [
+      'restaurant',
+      'bar',
+      'cafe',
+      'meal_takeaway',
+      'meal_delivery',
+      'taxi_stand',
+      'lodging'
+    ];
+
+    const filtered = (data.results || []).filter(r =>
+      (r.types || []).some(type => allowedTypes.includes(type))
+    );
+
+    return res.json({
+      status: 'OK',
+      total: filtered.length,
+      results: filtered.map(place => ({
+        name: place.name,
+        rating: place.rating,
+        votes: place.user_ratings_total,
+        address: place.vicinity || place.formatted_address,
+        place_id: place.place_id
+      }))
+    });
     const sorted = results
       .filter(x => x && (typeof x === 'object'))
       .sort((a, b) => {

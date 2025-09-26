@@ -1,57 +1,22 @@
-// /api/tts.js
-// Serverless TTS (OpenAI tts-1) → MP3
+import textToSpeech from '@google-cloud/text-to-speech';
 
-import { applyCors } from '../lib/cors.js';
-
-
-export default async function handler(req, res) {
-  if (applyCors(req, res)) return;
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+export default async function ttsHandler(req, res) {
   try {
-    const { text, voice = 'alloy', format = 'mp3' } = req.body || {};
-    if (!text || !text.trim()) {
-      return res.status(400).json({ error: 'Missing "text"' });
-    }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
-    }
+    const { text, lang = 'pl-PL', voiceName = 'pl-PL-Wavenet-D' } = req.body || {};
+    if (!text) return res.status(400).json({ error: 'Missing text' });
 
-    // OpenAI TTS (tts-1)
-    const r = await fetch('https://api.openai.com/v1/audio/speech', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'tts-1',
-        voice,            // 'alloy', 'verse', 'coral', 'sage'...
-        input: text,
-        format            // 'mp3' | 'wav' | 'opus' | 'aac'
-      })
+    const client = new textToSpeech.TextToSpeechClient();
+    const [resp] = await client.synthesizeSpeech({
+      input: { text },
+      voice: { languageCode: lang, name: voiceName },
+      audioConfig: { audioEncoding: 'MP3' },
     });
 
-    if (!r.ok) {
-      const msg = await r.text().catch(()=> '');
-      return res.status(502).json({ error: `OpenAI TTS ${r.status}: ${msg}` });
-    }
-
-    // strumień → Buffer
-    const arrayBuf = await r.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
-
-    const mime =
-      format === 'wav'  ? 'audio/wav'  :
-      format === 'opus' ? 'audio/ogg'  :
-      format === 'aac'  ? 'audio/aac'  : 'audio/mpeg';
-
-    res.setHeader('Content-Type', mime);
-    res.setHeader('Cache-Control', 'no-store');
-    return res.status(200).send(buf);
+    const audioContent = resp.audioContent?.toString('base64');
+    if (!audioContent) return res.status(500).json({ error: 'No audio' });
+    res.json({ audioContent });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    console.error('TTS error', e);
+    res.status(500).json({ error: String(e?.message || e) });
   }
 }
