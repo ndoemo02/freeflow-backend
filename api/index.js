@@ -1,6 +1,13 @@
-export default function handler(req, res) {
-  if (req.url === "/api/health") {
-    return res.status(200).json({ ok: true });
-  }
-  return res.status(404).json({ error: "Not found", path: req.url });
-}
+import express from "express";
+import cors from "cors";
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Health check
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+export default app;

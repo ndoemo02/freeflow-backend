@@ -4,15 +4,29 @@
   <meta charset="UTF-8">
   <title>DrWeb – Testowanie API Freeflow</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2em; background: #f7f7fa; }
-    h1 { color: #2a3a4a; }
-    form { background: #fff; padding: 1em; margin-bottom: 2em; border-radius: 8px; box-shadow: 0 2px 8px #0001; }
+    :root { --page-padding: 2rem; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { font-family: Arial, sans-serif; margin: 0; background: #f7f7fa; display: flex; justify-content: center; }
+    .container { width: min(100%, 960px); padding: var(--page-padding); overflow-x: hidden; }
+    h1 { color: #2a3a4a; text-align: center; }
+    .logo { display: block; max-width: 250px; width: 40%; height: auto; margin: 0 auto 1rem; }
+    form { background: #fff; padding: 1em; margin: 1rem 0 2rem; border-radius: 8px; box-shadow: 0 2px 8px #0001; }
     label { display: block; margin-top: 1em; }
-    input, button, textarea { font-size: 1em; margin-top: 0.3em; }
-    .result { background: #eef; padding: 0.5em; border-radius: 4px; margin-top: 0.5em; white-space: pre-wrap; }
+    input, button, textarea, select { font-size: 1em; margin-top: 0.3em; }
+    .result { background: #eef; padding: 0.5em; border-radius: 4px; margin-top: 0.5em; white-space: pre-wrap; overflow: auto; max-height: 40vh; }
+
+    @media (max-width: 768px) {
+      :root { --page-padding: 1rem; }
+      .logo { max-width: 180px; width: 60%; }
+      form { padding: 0.75em; margin: 0.75rem 0 1.25rem; }
+      input, textarea, select { width: 100%; }
+      .result { max-height: 50vh; }
+    }
   </style>
 </head>
 <body>
+  <div class="container">
   <h1>DrWeb – Testowanie API Freeflow</h1>
 
   <form id="env-form" style="background:#eaf; margin-bottom:2em;">
@@ -251,5 +265,6 @@
       }
     };
   </script>
+  </div>
 </body>
 </html>
