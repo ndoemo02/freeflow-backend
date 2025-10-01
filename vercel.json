@@ -1,0 +1,22 @@
+{
+  "rewrites": [
+    { "source": "/api/health", "destination": "/api/index/health" },
+    { "source": "/api/tts", "destination": "/api/index/tts" },
+    { "source": "/api/nlu", "destination": "/api/index/nlu" },
+    { "source": "/api/restaurants", "destination": "/api/index/restaurants" },
+    { "source": "/api/menu", "destination": "/api/index/menu" },
+    { "source": "/api/orders", "destination": "/api/index/orders" },
+    { "source": "/api/search", "destination": "/api/index/search" },
+    { "source": "/api/places", "destination": "/api/index/places" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Authorization" }
+      ]
+    }
+  ]
+}
