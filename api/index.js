@@ -3,30 +3,30 @@ import cors from "cors";
 
 // === Importy handlerów ===
 // AI / multimodalne
-import ttsHandler from "./tts.js";
-import sttHandler from "./stt.js";
-import whisperHandler from "./whisper.js";
-import geminiHandler from "./gemini.js";
-import geminiStreamHandler from "./gemini-stream.js";
-import gptHandler from "./gpt.js";
+import ttsHandler from "../lib/tts.js";
+import sttHandler from "../lib/stt.js";
+import whisperHandler from "../lib/whisper.js";
+import geminiHandler from "../lib/gemini.js";
+import geminiStreamHandler from "../lib/gemini-stream.js";
+import gptHandler from "../lib/gpt.js";
 
 // Restauracje / menu / zamówienia
-import restaurantsHandler from "./restaurants.js";
-import menuHandler from "./menu.js";
-import ordersHandler from "./orders.js";
-import orderStatusHandler from "./order-status.js";
-import orderRoutingHandler from "./order-routing.js";
+import restaurantsHandler from "../lib/restaurants.js";
+import menuHandler from "../lib/menu.js";
+import ordersHandler from "../lib/orders.js";
+import orderStatusHandler from "../lib/order-status.js";
+import orderRoutingHandler from "../lib/order-routing.js";
 
 // Biznes
-import businessRegisterHandler from "./business-register.js";
-import businessPanelHandler from "./business-panel.js";
-import businessCategoriesHandler from "./business-categories.js";
-import businessLeadsHandler from "./business_leads.js";
+import businessRegisterHandler from "../lib/business-register.js";
+import businessPanelHandler from "../lib/business-panel.js";
+import businessCategoriesHandler from "../lib/business-categories.js";
+import businessLeadsHandler from "../lib/business_leads.js";
 
 // Inne
-import authHandler from "./auth.js";
-import placesHandler from "./places.js";
-import envTestHandler from "./env-test.js";
+import authHandler from "../lib/auth.js";
+import placesHandler from "../lib/places.js";
+import envTestHandler from "../lib/env-test.js";
 
 const app = express();
 app.use(cors());
