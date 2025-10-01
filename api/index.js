@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import serverless from "serverless-http";
 
-// === importy handlerów ===
+// === Importy handlerów ===
 import ttsHandler from "../lib/tts.js";
 import sttHandler from "../lib/stt.js";
 import whisperHandler from "../lib/whisper.js";
