@@ -903,3 +903,4 @@
 /assets/*.js.map
 /assets/*.css
 /assets/*.css.map
+.vercel
