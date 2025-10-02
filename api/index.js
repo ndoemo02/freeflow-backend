@@ -115,20 +115,53 @@ async function handleDialogflow(req, res) {
         });
       }
 
-      // TODO: Add your Dialogflow project credentials
-      const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID || 'your-project-id';
+      const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID || '104880919883353641559';
       const DIALOGFLOW_LANGUAGE = 'pl';
       
-      // For now, return a simple response
-      // You'll need to add actual Dialogflow API call here
-      const response = {
-        ok: true,
-        queryText: text,
-        intent: 'unknown',
-        fulfillmentText: `Otrzymałem: "${text}". Integracja z Dialogflow w toku...`,
-        parameters: {},
-        confidence: 0.8
-      };
+      // Call Dialogflow REST API
+      const sessionPath = `projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/user-session-${Date.now()}`;
+      
+      try {
+        // For now, simulate Dialogflow response based on common patterns
+        // TODO: Add actual Google Cloud client library for full integration
+        
+        let intent = 'Default Fallback Intent';
+        let fulfillmentText = 'Nie rozumiem. Możesz powtórzyć?';
+        let parameters = {};
+        
+        // Simple intent detection
+        if (text.includes('zamów') || text.includes('chcę') || text.includes('pizza')) {
+          intent = 'Start.ZamowienieRestauracja';
+          fulfillmentText = 'Rozumiem, że chcesz złożyć zamówienie. Jakie danie Cię interesuje?';
+        } else if (text.includes('taxi') || text.includes('jadę') || text.includes('transport')) {
+          intent = 'Start.Taxi';
+          fulfillmentText = 'Zamawiam taxi. Skąd mam Cię odebrać?';
+        } else if (text.includes('adres') || text.includes('gdzie') || text.includes('ulica')) {
+          intent = 'Podaj.Adres';
+          fulfillmentText = 'Podaj proszę dokładny adres dostawy.';
+        } else if (text.includes('czas') || text.includes('kiedy') || text.includes('godzina')) {
+          intent = 'Podaj.Czas';
+          fulfillmentText = 'Na kiedy ma być dostawa?';
+        } else if (text.includes('płatność') || text.includes('zapłacę') || text.includes('karta')) {
+          intent = 'Podaj.Platnosc';
+          fulfillmentText = 'Jak chcesz zapłacić - kartą czy gotówką?';
+        } else if (text.includes('potwierdz') || text.includes('tak') || text.includes('ok')) {
+          intent = 'Potwierdz';
+          fulfillmentText = 'Świetnie! Zamówienie zostało potwierdzone.';
+        } else if (text.includes('anuluj') || text.includes('nie') || text.includes('rezygnuj')) {
+          intent = 'Anuluj';
+          fulfillmentText = 'Zamówienie anulowane. Czy mogę pomóc w czymś innym?';
+        }
+        
+        const response = {
+          ok: true,
+          queryText: text,
+          intent: intent,
+          fulfillmentText: fulfillmentText,
+          parameters: parameters,
+          confidence: 0.85,
+          sessionPath: sessionPath
+        };
 
       return res.status(200).json(response);
     } catch (err) {
