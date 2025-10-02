@@ -14,6 +14,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@google-cloud/dialogflow": "^7.2.0",
     "@google-cloud/speech": "^7.2.0",
     "@google-cloud/text-to-speech": "^5.8.1",
     "@google/generative-ai": "^0.11.0",

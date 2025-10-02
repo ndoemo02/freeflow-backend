@@ -2,11 +2,31 @@
 // Wszystkie endpointy w jednym pliku: /api/index?endpoint=health, /api/index?endpoint=tts, etc.
 
 import { createClient } from '@supabase/supabase-js';
+import { SessionsClient } from '@google-cloud/dialogflow';
 
 const supabase = createClient(
   process.env.SUPABASE_URL || 'https://xdhlztmjktminrwmzcpl.supabase.co',
   process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhkaGx6dG1qa3RtaW5yd216Y3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY3MjgwMTEsImV4cCI6MjA3MjMwNDAxMX0.EmvBqbygr4VLD3PXFaPjbChakRi5YtSrxp8e_K7ZyGY'
 );
+
+// Dialogflow setup - use YOUR agent project ID
+const projectId = process.env.GOOGLE_PROJECT_ID || '104880919883353641559';
+
+// Use Vercel environment credentials (recommended for production)
+let sessionClient;
+
+if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+  // Production: Use Vercel environment variable
+  const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  sessionClient = new SessionsClient({ credentials, projectId });
+} else {
+  // Local development fallback
+  console.log('⚠️ Using local service account - tylko do testów lokalnych!');
+  sessionClient = new SessionsClient({ 
+    keyFilename: './service-account.json',
+    projectId 
+  });
+}
 
 // Helper functions for CORS
 function setCors(res) {
@@ -102,79 +122,78 @@ async function handleNlu(req, res) {
 }
 
 async function handleDialogflow(req, res) {
-  if (req.method === 'POST') {
-    try {
-      const body = req.body || {};
-      const text = String(body.text || body.queryText || '');
-      
-      if (!text) {
-        return res.status(200).json({ 
-          ok: false, 
-          error: 'NO_TEXT',
-          fulfillmentText: 'Nie rozumiem. Możesz powtórzyć?'
-        });
-      }
-
-      const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID || '104880919883353641559';
-      const DIALOGFLOW_LANGUAGE = 'pl';
-      
-      // Call Dialogflow REST API
-      const sessionPath = `projects/${DIALOGFLOW_PROJECT_ID}/agent/sessions/user-session-${Date.now()}`;
-      
-      try {
-        // For now, simulate Dialogflow response based on common patterns
-        // TODO: Add actual Google Cloud client library for full integration
-        
-        let intent = 'Default Fallback Intent';
-        let fulfillmentText = 'Nie rozumiem. Możesz powtórzyć?';
-        let parameters = {};
-        
-        // Simple intent detection
-        if (text.includes('zamów') || text.includes('chcę') || text.includes('pizza')) {
-          intent = 'Start.ZamowienieRestauracja';
-          fulfillmentText = 'Rozumiem, że chcesz złożyć zamówienie. Jakie danie Cię interesuje?';
-        } else if (text.includes('taxi') || text.includes('jadę') || text.includes('transport')) {
-          intent = 'Start.Taxi';
-          fulfillmentText = 'Zamawiam taxi. Skąd mam Cię odebrać?';
-        } else if (text.includes('adres') || text.includes('gdzie') || text.includes('ulica')) {
-          intent = 'Podaj.Adres';
-          fulfillmentText = 'Podaj proszę dokładny adres dostawy.';
-        } else if (text.includes('czas') || text.includes('kiedy') || text.includes('godzina')) {
-          intent = 'Podaj.Czas';
-          fulfillmentText = 'Na kiedy ma być dostawa?';
-        } else if (text.includes('płatność') || text.includes('zapłacę') || text.includes('karta')) {
-          intent = 'Podaj.Platnosc';
-          fulfillmentText = 'Jak chcesz zapłacić - kartą czy gotówką?';
-        } else if (text.includes('potwierdz') || text.includes('tak') || text.includes('ok')) {
-          intent = 'Potwierdz';
-          fulfillmentText = 'Świetnie! Zamówienie zostało potwierdzone.';
-        } else if (text.includes('anuluj') || text.includes('nie') || text.includes('rezygnuj')) {
-          intent = 'Anuluj';
-          fulfillmentText = 'Zamówienie anulowane. Czy mogę pomóc w czymś innym?';
-        }
-        
-        const response = {
-          ok: true,
-          queryText: text,
-          intent: intent,
-          fulfillmentText: fulfillmentText,
-          parameters: parameters,
-          confidence: 0.85,
-          sessionPath: sessionPath
-        };
-
-      return res.status(200).json(response);
-    } catch (err) {
-      console.error('Dialogflow error:', err);
-      return res.status(500).json({ 
-        ok: false, 
-        error: 'DIALOGFLOW_ERROR', 
-        detail: String(err),
-        fulfillmentText: 'Przepraszam, wystąpił błąd. Spróbuj ponownie.'
-      });
-    }
+  setCors(res);
+  
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
-  return res.status(405).json({ error: 'Method not allowed' });
+
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  try {
+    const { text, sessionId = 'default-session' } = req.body;
+    
+    if (!text) {
+      res.status(400).json({ error: 'Text is required' });
+      return;
+    }
+
+    console.log('📝 Dialogflow input:', text);
+
+    // Create session path
+    const sessionPath = sessionClient.projectAgentSessionPath(projectId, sessionId);
+
+    // The text query request
+    const request = {
+      session: sessionPath,
+      queryInput: {
+        text: {
+          text: text,
+          languageCode: 'pl-PL',
+        },
+      },
+    };
+
+    console.log('🔄 Sending to Dialogflow...');
+    
+    // Send request to Dialogflow
+    const [response] = await sessionClient.detectIntent(request);
+    
+    console.log('🤖 Dialogflow raw response:', JSON.stringify(response, null, 2));
+    
+    const result = response.queryResult;
+    
+    const formattedResponse = {
+      fulfillmentText: result.fulfillmentText || 'Nie rozumiem. Spróbuj ponownie.',
+      intent: result.intent ? result.intent.displayName : 'unknown',
+      confidence: result.intentDetectionConfidence || 0,
+      parameters: result.parameters || {},
+      allRequiredParamsPresent: result.allRequiredParamsPresent || false,
+      timestamp: new Date().toISOString(),
+      sessionId
+    };
+
+    console.log('✅ Formatted Dialogflow response:', formattedResponse);
+    res.status(200).json(formattedResponse);
+    
+  } catch (error) {
+    console.error('❌ Dialogflow error:', error);
+    
+    // Fallback response in case of Dialogflow failure
+    const fallbackResponse = {
+      fulfillmentText: 'Przepraszam, wystąpił problem z rozpoznawaniem mowy. Spróbuj ponownie.',
+      intent: 'error.fallback',
+      confidence: 0,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
+    
+    res.status(500).json(fallbackResponse);
+  }
 }
 
 async function handleRestaurants(req, res) {
