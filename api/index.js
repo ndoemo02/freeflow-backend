@@ -10,7 +10,7 @@ const supabase = createClient(
 );
 
 // Dialogflow setup - use YOUR agent project ID
-const projectId = process.env.GOOGLE_PROJECT_ID || '104880919883353641559';
+const projectId = process.env.GOOGLE_PROJECT_ID || 'civic-polymer-470119-j2';
 
 // Use Vercel environment credentials (recommended for production)
 let sessionClient;
