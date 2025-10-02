@@ -32,7 +32,8 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
 }
 
 // NLU Helper functions
@@ -122,13 +123,6 @@ async function handleNlu(req, res) {
 }
 
 async function handleDialogflow(req, res) {
-  setCors(res);
-  
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
