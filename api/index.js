@@ -79,6 +79,8 @@ async function handleNlu(req, res) {
         return res.status(200).json({ ok: false, error: 'NO_TEXT' });
       }
 
+      // TODO: Replace with actual Dialogflow integration
+      // For now, use simple parsing as fallback
       const parsed = {
         restaurant: text.includes('włoska') ? 'Trattoria Napoli' :
                     text.includes('polska') ? 'Złota Łyżka' : 'Demo Resto',
@@ -93,6 +95,49 @@ async function handleNlu(req, res) {
         ok: false, 
         error: 'NLU_ERROR', 
         detail: String(err) 
+      });
+    }
+  }
+  return res.status(405).json({ error: 'Method not allowed' });
+}
+
+async function handleDialogflow(req, res) {
+  if (req.method === 'POST') {
+    try {
+      const body = req.body || {};
+      const text = String(body.text || body.queryText || '');
+      
+      if (!text) {
+        return res.status(200).json({ 
+          ok: false, 
+          error: 'NO_TEXT',
+          fulfillmentText: 'Nie rozumiem. Możesz powtórzyć?'
+        });
+      }
+
+      // TODO: Add your Dialogflow project credentials
+      const DIALOGFLOW_PROJECT_ID = process.env.DIALOGFLOW_PROJECT_ID || 'your-project-id';
+      const DIALOGFLOW_LANGUAGE = 'pl';
+      
+      // For now, return a simple response
+      // You'll need to add actual Dialogflow API call here
+      const response = {
+        ok: true,
+        queryText: text,
+        intent: 'unknown',
+        fulfillmentText: `Otrzymałem: "${text}". Integracja z Dialogflow w toku...`,
+        parameters: {},
+        confidence: 0.8
+      };
+
+      return res.status(200).json(response);
+    } catch (err) {
+      console.error('Dialogflow error:', err);
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'DIALOGFLOW_ERROR', 
+        detail: String(err),
+        fulfillmentText: 'Przepraszam, wystąpił błąd. Spróbuj ponownie.'
       });
     }
   }
@@ -405,6 +450,8 @@ export default async function handler(req, res) {
         return await handleTts(req, res);
       case 'nlu':
         return await handleNlu(req, res);
+      case 'dialogflow':
+        return await handleDialogflow(req, res);
       case 'restaurants':
         return await handleRestaurants(req, res);
       case 'menu':
@@ -425,6 +472,7 @@ export default async function handler(req, res) {
             '/api/health',
             '/api/tts',
             '/api/nlu',
+            '/api/dialogflow',
             '/api/restaurants',
             '/api/menu',
             '/api/orders',
