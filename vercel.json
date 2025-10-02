@@ -3,6 +3,7 @@
     { "source": "/api/health", "destination": "/api/index/health" },
     { "source": "/api/tts", "destination": "/api/index/tts" },
     { "source": "/api/nlu", "destination": "/api/index/nlu" },
+    { "source": "/api/dialogflow", "destination": "/api/index/dialogflow" },
     { "source": "/api/restaurants", "destination": "/api/index/restaurants" },
     { "source": "/api/menu", "destination": "/api/index/menu" },
     { "source": "/api/orders", "destination": "/api/index/orders" },
