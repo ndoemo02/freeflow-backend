@@ -17,6 +17,7 @@ let sessionClient;
 
 console.log('🔍 Environment check:');
 console.log('- GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+console.log('- GOOGLE_API_KEY exists:', !!process.env.GOOGLE_API_KEY);
 console.log('- Project ID:', projectId);
 
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
@@ -24,6 +25,13 @@ if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   console.log('✅ Using Vercel environment credentials');
   const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
   sessionClient = new SessionsClient({ credentials, projectId });
+} else if (process.env.GOOGLE_API_KEY) {
+  // Fallback: Use API Key
+  console.log('🔑 Using Google API Key');
+  sessionClient = new SessionsClient({ 
+    apiKey: process.env.GOOGLE_API_KEY,
+    projectId 
+  });
 } else {
   // Local development fallback
   console.log('⚠️ Using local service account - tylko do testów lokalnych!');
