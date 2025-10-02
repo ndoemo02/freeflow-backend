@@ -15,8 +15,13 @@ const projectId = process.env.GOOGLE_PROJECT_ID || '104880919883353641559';
 // Use Vercel environment credentials (recommended for production)
 let sessionClient;
 
+console.log('🔍 Environment check:');
+console.log('- GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+console.log('- Project ID:', projectId);
+
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
   // Production: Use Vercel environment variable
+  console.log('✅ Using Vercel environment credentials');
   const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
   sessionClient = new SessionsClient({ credentials, projectId });
 } else {
@@ -137,6 +142,7 @@ async function handleDialogflow(req, res) {
     }
 
     console.log('📝 Dialogflow input:', text);
+    console.log('🔑 Session client exists:', !!sessionClient);
 
     // Create session path
     const sessionPath = sessionClient.projectAgentSessionPath(projectId, sessionId);
