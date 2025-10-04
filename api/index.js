@@ -17,13 +17,26 @@ let sessionClient;
 
 console.log('🔍 Environment check:');
 console.log('- GOOGLE_APPLICATION_CREDENTIALS_JSON exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+console.log('- GOOGLE_APPLICATION_CREDENTIALS_BASE64 exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64);
 console.log('- GOOGLE_API_KEY exists:', !!process.env.GOOGLE_API_KEY);
 console.log('- Project ID:', projectId);
 
 if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-  // Production: Use Vercel environment variable
-  console.log('✅ Using Vercel environment credentials');
+  // Production: Use Vercel environment variable (JSON)
+  console.log('✅ Using Vercel environment credentials (JSON)');
   const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+  sessionClient = new SessionsClient({ credentials, projectId });
+} else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
+  // Production: Use Vercel environment variable (Base64)
+  console.log('✅ Using Vercel environment credentials (Base64)');
+  const credentialsJson = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
+  const credentials = JSON.parse(credentialsJson);
+  sessionClient = new SessionsClient({ credentials, projectId });
+} else if (process.env.GOOGLE_CREDENTIALS_PART1 && process.env.GOOGLE_CREDENTIALS_PART2) {
+  // Production: Use Vercel environment variable (Split JSON)
+  console.log('✅ Using Vercel environment credentials (Split)');
+  const credentialsJson = process.env.GOOGLE_CREDENTIALS_PART1 + process.env.GOOGLE_CREDENTIALS_PART2;
+  const credentials = JSON.parse(credentialsJson);
   sessionClient = new SessionsClient({ credentials, projectId });
 } else if (process.env.GOOGLE_API_KEY) {
   // Fallback: Use API Key
@@ -486,6 +499,65 @@ async function handlePlaces(req, res) {
   return handleSearch(searchReq, res);
 }
 
+// --- Dialogflow CX Webhook (PLACES_RECS / ORDER_CREATE) ---
+async function handleDialogflowWebhook(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const tag    = req.body?.fulfillmentInfo?.tag || '';
+  const params = req.body?.sessionInfo?.parameters || {};
+
+  try {
+    // 1) Rekomendacje pobliskich miejsc (mock — podmień na swoje źródło)
+    if (tag === 'PLACES_RECS') {
+      const dishType = String(params.dish_type ?? '');
+      const radiusKm = Number(params.radius_km ?? 10);
+
+      const results = [
+        { name: 'Rybna Fala',     distance_km: 2.1 },
+        { name: 'Karczma Śląska', distance_km: 3.8 },
+        { name: 'Złota Okońka',   distance_km: 6.4 },
+      ];
+      const lines = results.map(r => `${r.name} — ok. ${r.distance_km} km`).join('\n');
+
+      return res.json({
+        fulfillment_response: { messages: [{ text: { text: [
+          `Dla ${dishType} w promieniu ${radiusKm} km mam:\n${lines}\nChcesz coś do picia?`
+        ]}}]},
+        session_info: { parameters: { restaurant_options: results } }
+      });
+    }
+
+    // 2) Utworzenie zamówienia (mock + ETA widełki)
+    if (tag === 'ORDER_CREATE') {
+      const food  = String(params.food_item ?? '');
+      const count = Number(params.number ?? 1);
+      const drink = params.drink ? String(params.drink) : null;
+
+      // TODO: tutaj wrzuć insert do Supabase (tryb testowy)
+      const orderId = Math.floor(Math.random() * 1_000_000);
+      const eta = '40–60 min';
+
+      return res.json({
+        fulfillment_response: { messages: [{ text: { text: [
+          `Zamówienie #${orderId} przyjęte: ${count} × ${food}${drink ? ` + ${drink}` : ''}. Czas: ${eta}.`
+        ]}}]},
+        session_info: { parameters: { order_id: orderId, eta } }
+      });
+    }
+
+    // Domyślnie, gdy tag nie pasuje
+    return res.json({
+      fulfillment_response: { messages: [{ text: { text: ['OK.'] } }] }
+    });
+  } catch (e) {
+    return res.json({
+      fulfillment_response: { messages: [{ text: { text: ['Błąd serwera testowego.'] } }] }
+    });
+  }
+}
+
 // Main handler - routing based on URL path
 export default async function handler(req, res) {
   setCors(res);
@@ -496,7 +568,16 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Extract endpoint from URL path
+    // Extract path from URL for direct routing
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const path = url.pathname; // np. "/api/dialogflow-webhook"
+
+    // Direct path routing for webhooks
+    if (path === '/api/dialogflow-webhook') {
+      return handleDialogflowWebhook(req, res);
+    }
+
+    // Extract endpoint from URL path (legacy routing)
     const urlPath = req.url || '';
     const endpoint = urlPath.split('/').pop().split('?')[0];
 
@@ -512,6 +593,8 @@ export default async function handler(req, res) {
         return await handleNlu(req, res);
       case 'dialogflow':
         return await handleDialogflow(req, res);
+      case 'dialogflow-webhook':
+        return await handleDialogflowWebhook(req, res);
       case 'restaurants':
         return await handleRestaurants(req, res);
       case 'menu':
@@ -533,6 +616,7 @@ export default async function handler(req, res) {
             '/api/tts',
             '/api/nlu',
             '/api/dialogflow',
+            '/api/dialogflow-webhook',
             '/api/restaurants',
             '/api/menu',
             '/api/orders',
