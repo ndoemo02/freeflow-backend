@@ -499,82 +499,79 @@ async function handlePlaces(req, res) {
   return handleSearch(searchReq, res);
 }
 
-// --- Dialogflow CX Webhook (PLACES_RECS / ORDER_CREATE) ---
-async function handleDialogflowWebhook(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
-
-  const tag    = req.body?.fulfillmentInfo?.tag || '';
-  const params = req.body?.sessionInfo?.parameters || {};
-
-  try {
-    // 1) Rekomendacje pobliskich miejsc (mock — podmień na swoje źródło)
-    if (tag === 'PLACES_RECS') {
-      const dishType = String(params.dish_type ?? '');
-      const radiusKm = Number(params.radius_km ?? 10);
-
-      const results = [
-        { name: 'Rybna Fala',     distance_km: 2.1 },
-        { name: 'Karczma Śląska', distance_km: 3.8 },
-        { name: 'Złota Okońka',   distance_km: 6.4 },
-      ];
-      const lines = results.map(r => `${r.name} — ok. ${r.distance_km} km`).join('\n');
-
-      return res.json({
-        fulfillment_response: { messages: [{ text: { text: [
-          `Dla ${dishType} w promieniu ${radiusKm} km mam:\n${lines}\nChcesz coś do picia?`
-        ]}}]},
-        session_info: { parameters: { restaurant_options: results } }
-      });
-    }
-
-    // 2) Utworzenie zamówienia (mock + ETA widełki)
-    if (tag === 'ORDER_CREATE') {
-      const food  = String(params.food_item ?? '');
-      const count = Number(params.number ?? 1);
-      const drink = params.drink ? String(params.drink) : null;
-
-      // TODO: tutaj wrzuć insert do Supabase (tryb testowy)
-      const orderId = Math.floor(Math.random() * 1_000_000);
-      const eta = '40–60 min';
-
-      return res.json({
-        fulfillment_response: { messages: [{ text: { text: [
-          `Zamówienie #${orderId} przyjęte: ${count} × ${food}${drink ? ` + ${drink}` : ''}. Czas: ${eta}.`
-        ]}}]},
-        session_info: { parameters: { order_id: orderId, eta } }
-      });
-    }
-
-    // Domyślnie, gdy tag nie pasuje
-    return res.json({
-      fulfillment_response: { messages: [{ text: { text: ['OK.'] } }] }
-    });
-  } catch (e) {
-    return res.json({
-      fulfillment_response: { messages: [{ text: { text: ['Błąd serwera testowego.'] } }] }
-    });
-  }
-}
 
 // Main handler - routing based on URL path
 export default async function handler(req, res) {
-  setCors(res);
-  
-  // Handle OPTIONS for CORS preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
   try {
-    // Extract path from URL for direct routing
-    const url = new URL(req.url, `http://${req.headers.host}`);
-    const path = url.pathname; // np. "/api/dialogflow-webhook"
+    // --- bezpieczne ustalenie ścieżki
+    const host = req.headers?.host || 'localhost';
+    const urlObj = new URL(req.url, `http://${host}`);
+    const path = urlObj.pathname; // np. "/api/dialogflow-webhook"
 
-    // Direct path routing for webhooks
+    // --- body może być stringiem (nie zawsze auto-parse)
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (_) { body = {}; }
+    } else if (!body) {
+      body = {};
+    }
+
+    // szybki log diagnostyczny (zobaczysz go w Vercel → Logs)
+    console.log('REQ PATH:', path);
+    console.log('REQ TAG :', body?.fulfillmentInfo?.tag);
+
     if (path === '/api/dialogflow-webhook') {
-      return handleDialogflowWebhook(req, res);
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
+      }
+
+      const tag    = body?.fulfillmentInfo?.tag || '';
+      const params = body?.sessionInfo?.parameters || {};
+
+      if (tag === 'PLACES_RECS') {
+        const dishType = String(params.dish_type ?? '');
+        const radiusKm = Number(params.radius_km ?? 10);
+        const results = [
+          { name: 'Rybna Fala',     distance_km: 2.1 },
+          { name: 'Karczma Śląska', distance_km: 3.8 },
+          { name: 'Złota Okońka',   distance_km: 6.4 },
+        ];
+        const lines = results.map(r => `${r.name} — ok. ${r.distance_km} km`).join('\n');
+        return res.json({
+          fulfillment_response: { messages: [{ text: { text: [
+            `Dla ${dishType} w promieniu ${radiusKm} km mam:\n${lines}\nChcesz coś do picia?`
+          ]}}]},
+          session_info: { parameters: { restaurant_options: results } }
+        });
+      }
+
+      if (tag === 'ORDER_CREATE') {
+        const food  = String(params.food_item ?? '');
+        const count = Number(params.number ?? 1);
+        const drink = params.drink ? String(params.drink) : null;
+        const orderId = Math.floor(Math.random() * 1_000_000);
+        const eta = '40–60 min';
+
+        return res.json({
+          fulfillment_response: { messages: [{ text: { text: [
+            `Zamówienie #${orderId} przyjęte: ${count} × ${food}${drink ? ` + ${drink}` : ''}. Czas: ${eta}.`
+          ]}}]},
+          session_info: { parameters: { order_id: orderId, eta } }
+        });
+      }
+
+      // brak tagu → miękka odpowiedź, żeby DF nie wywalał błędu
+      return res.json({
+        fulfillment_response: { messages: [{ text: { text: ['OK. (brak/nieznany tag)'] } }] }
+      });
+    }
+
+    // CORS handling
+    setCors(res);
+    
+    // Handle OPTIONS for CORS preflight
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
     }
 
     // Extract endpoint from URL path (legacy routing)
@@ -593,8 +590,6 @@ export default async function handler(req, res) {
         return await handleNlu(req, res);
       case 'dialogflow':
         return await handleDialogflow(req, res);
-      case 'dialogflow-webhook':
-        return await handleDialogflowWebhook(req, res);
       case 'restaurants':
         return await handleRestaurants(req, res);
       case 'menu':
@@ -625,17 +620,13 @@ export default async function handler(req, res) {
           ]
         });
       default:
-        return res.status(404).json({ 
-          error: 'Endpoint not found',
-          requested: endpoint,
-          available: ['health', 'tts', 'nlu', 'restaurants', 'menu', 'orders', 'search', 'places']
-        });
+        return res.status(404).json({ error: 'Not found' });
     }
-  } catch (error) {
-    console.error('API Error:', error);
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      detail: error.message 
+  } catch (e) {
+    console.error('WEBHOOK ERROR:', e);
+    // zwróć 200 z tekstem – DF lubi 200; ale logi pokażą przyczynę
+    return res.json({
+      fulfillment_response: { messages: [{ text: { text: ['Błąd serwera testowego.'] } }] }
     });
   }
 }
