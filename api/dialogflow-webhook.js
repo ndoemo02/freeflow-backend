@@ -42,6 +42,8 @@ export default async (req, res) => {
       const name = String(p.food_item || '');
       let restaurantId = p.restaurant_id || (p.restaurant_options?.[0]?.id) || null;
 
+      console.log('ORDER_CREATE params:', { qty, name, restaurantId, p });
+
       // 1) Pobierz danie z menu z prep_min
       const { data: mi, error: miErr } = await supabase
         .from('menu_items')
@@ -49,10 +51,13 @@ export default async (req, res) => {
         .eq('restaurant_id', restaurantId)
         .eq('name', name)
         .single();
+      
+      console.log('menu_items query result:', { mi, miErr });
+      
       if (miErr || !mi) {
         console.error('menu_items error', miErr);
         return res.status(200).json({
-          fulfillment_response: { messages: [{ text: { text: ['Nie znalazłem tej pozycji w menu.'] } }] }
+          fulfillment_response: { messages: [{ text: { text: [`Nie znalazłem tej pozycji w menu. Błąd: ${miErr?.message || 'Brak danych'}`] } }] }
         });
       }
 
