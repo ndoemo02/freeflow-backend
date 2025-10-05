@@ -1,29 +1,32 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE, {
   auth: { persistSession: false }
 });
 
-function round5(n) { return Math.max(5, Math.round(n / 5) * 5); }
+function round5(n) {
+  return Math.max(5, Math.round(n / 5) * 5);
+}
+
 function etaWindow(mins) {
   const low = round5(Math.max(5, Math.floor(mins * 0.8)));
   const high = round5(Math.max(low + 5, Math.ceil(mins * 1.2)));
   return `${low}–${high} min`;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST')
+    if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-    let body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const tag = body?.fulfillmentInfo?.tag || '';
     const p = body?.sessionInfo?.parameters || {};
 
     console.log('📩 [DialogflowCX] webhook tag:', tag);
 
-    // ----------------------------------------------------------
-    // 🔹 TAG 1: RECOMMEND_NEARBY (np. "Co w pobliżu")
-    // ----------------------------------------------------------
+    // 🔹 RECOMMEND_NEARBY
     if (tag === 'RECOMMEND_NEARBY') {
       const dishType = String(p.dish_type ?? '');
       const radiusKm = Number(p.radius_km ?? 10);
@@ -44,9 +47,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // 🔹 TAG 2: ORDER_CREATE (Tworzenie zamówienia)
-    // ----------------------------------------------------------
+    // 🔹 ORDER_CREATE
     if (tag === 'ORDER_CREATE') {
       const qty = Number(p.number || 1);
       const name = String(p.food_item || '');
@@ -102,6 +103,7 @@ module.exports = async (req, res) => {
         })
         .select('id, eta')
         .single();
+
       if (ordErr) throw ordErr;
 
       await supabase.from('order_items').insert({
@@ -126,9 +128,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // 🔹 INNE przypadki (fallback)
-    // ----------------------------------------------------------
+    // 🔹 Fallback
     return res.status(200).json({
       fulfillment_response: {
         messages: [{ text: { text: ["OK, przyjąłem dane. Powiedz co chcesz zamówić."] } }]
@@ -137,10 +137,9 @@ module.exports = async (req, res) => {
 
   } catch (e) {
     console.error('❌ Dialogflow CX Webhook error:', e);
-    return res.status(200).json({
-      fulfillment_response: {
-        messages: [{ text: { text: ['Błąd serwera FreeFlow.'] } }]
-      }
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: e.message
     });
   }
-};
+}
