@@ -1,52 +1,60 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE, {
   auth: { persistSession: false }
 });
 
-function round5(n) { return Math.max(5, Math.round(n / 5) * 5); }
+function round5(n) {
+  return Math.max(5, Math.round(n / 5) * 5);
+}
+
 function etaWindow(mins) {
   const low = round5(Math.max(5, Math.floor(mins * 0.8)));
   const high = round5(Math.max(low + 5, Math.ceil(mins * 1.2)));
   return `${low}–${high} min`;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST')
+    if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-    let body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const tag = body?.fulfillmentInfo?.tag || '';
     const p = body?.sessionInfo?.parameters || {};
 
     console.log('📩 [DialogflowCX] webhook tag:', tag);
 
-    // ----------------------------------------------------------
-    // 🔹 TAG 1: RECOMMEND_NEARBY (np. "Co w pobliżu")
-    // ----------------------------------------------------------
+    // 🔹 RECOMMEND_NEARBY
     if (tag === 'RECOMMEND_NEARBY') {
-      const dishType = String(p.dish_type ?? '');
-      const radiusKm = Number(p.radius_km ?? 10);
-      const results = [
-        { name: 'Rybna Fala', distance_km: 2.1 },
-        { name: 'Karczma Śląska', distance_km: 3.8 },
-        { name: 'Złota Okońka', distance_km: 6.4 },
-      ];
-      const lines = results.map(r => `${r.name} — ok. ${r.distance_km} km`).join('\n');
+      const { data: nearby } = await supabase
+        .rpc('get_nearby_restaurants', {
+          user_lat: p.latitude ?? 50.382, // fallback: Piekary Śląskie
+          user_lon: p.longitude ?? 18.948,
+          radius_km: p.radius_km ?? 5,
+          dish_type: p.dish_type ?? null
+        });
+
+      if (!nearby?.length) {
+        return res.status(200).json({
+          fulfillment_response: {
+            messages: [{ text: { text: ['Nie znalazłem nic w okolicy. Spróbuj zwiększyć promień lub zmienić kategorię.'] } }]
+          }
+        });
+      }
+
+      const list = nearby.map(r => `${r.name} — ok. ${r.distance_km.toFixed(1)} km`).join('\n');
 
       return res.status(200).json({
         fulfillment_response: {
-          messages: [{
-            text: { text: [`Dla ${dishType || 'obiadu'} w promieniu ${radiusKm} km mam:\n${lines}\nChcesz coś do picia?`] }
-          }]
+          messages: [{ text: { text: [`Oto ${p.dish_type || 'lokale'} w okolicy:\n${list}`] } }]
         },
-        session_info: { parameters: { restaurant_options: results } }
+        session_info: { parameters: { restaurant_options: nearby } }
       });
     }
 
-    // ----------------------------------------------------------
-    // 🔹 TAG 2: ORDER_CREATE (Tworzenie zamówienia)
-    // ----------------------------------------------------------
+    // 🔹 ORDER_CREATE
     if (tag === 'ORDER_CREATE') {
       const qty = Number(p.number || 1);
       const name = String(p.food_item || '');
@@ -102,6 +110,7 @@ module.exports = async (req, res) => {
         })
         .select('id, eta')
         .single();
+
       if (ordErr) throw ordErr;
 
       await supabase.from('order_items').insert({
@@ -126,9 +135,7 @@ module.exports = async (req, res) => {
       });
     }
 
-    // ----------------------------------------------------------
-    // 🔹 INNE przypadki (fallback)
-    // ----------------------------------------------------------
+    // 🔹 Fallback
     return res.status(200).json({
       fulfillment_response: {
         messages: [{ text: { text: ["OK, przyjąłem dane. Powiedz co chcesz zamówić."] } }]
@@ -137,10 +144,9 @@ module.exports = async (req, res) => {
 
   } catch (e) {
     console.error('❌ Dialogflow CX Webhook error:', e);
-    return res.status(200).json({
-      fulfillment_response: {
-        messages: [{ text: { text: ['Błąd serwera FreeFlow.'] } }]
-      }
+    return res.status(500).json({
+      error: 'Internal server error',
+      message: e.message
     });
   }
-};
+}
