@@ -499,7 +499,6 @@ async function handlePlaces(req, res) {
   return handleSearch(searchReq, res);
 }
 
-
 // Main handler - routing based on URL path
 export default async function handler(req, res) {
   setCors(res);
@@ -558,11 +557,11 @@ export default async function handler(req, res) {
       default:
         return res.status(404).json({ error: 'Not found' });
     }
-  } catch (e) {
-    console.error('WEBHOOK ERROR:', e);
-    // zwróć 200 z tekstem – DF lubi 200; ale logi pokażą przyczynę
-    return res.json({
-      fulfillment_response: { messages: [{ text: { text: ['Błąd serwera testowego.'] } }] }
+  } catch (error) {
+    console.error('API Error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      detail: error.message 
     });
   }
 }
