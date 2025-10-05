@@ -14,6 +14,15 @@ function etaWindow(mins) {
   return `${low}–${high} min`;
 }
 
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2)**2 + Math.cos(lat1 * Math.PI / 180) *
+            Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') {
@@ -28,29 +37,63 @@ export default async function handler(req, res) {
 
     // 🔹 RECOMMEND_NEARBY
     if (tag === 'RECOMMEND_NEARBY') {
-      const { data: nearby } = await supabase
-        .rpc('get_nearby_restaurants', {
-          user_lat: p.latitude ?? 50.382, // fallback: Piekary Śląskie
-          user_lon: p.longitude ?? 18.948,
-          radius_km: p.radius_km ?? 5,
-          dish_type: p.dish_type ?? null
-        });
+      const location = p.location || {};
+      const userLat = location.latitude ?? 50.382; // fallback: Piekary Śląskie
+      const userLon = location.longitude ?? 18.948;
+      const radiusKm = Number(p.radius_km ?? 5);
 
-      if (!nearby?.length) {
+      // Pobierz wszystkie restauracje z bazy danych
+      const { data: restaurants, error: restaurantsError } = await supabase
+        .from('restaurants')
+        .select('id, name, address, lat, lng');
+
+      if (restaurantsError) {
+        console.error('Error fetching restaurants:', restaurantsError);
         return res.status(200).json({
           fulfillment_response: {
-            messages: [{ text: { text: ['Nie znalazłem nic w okolicy. Spróbuj zwiększyć promień lub zmienić kategorię.'] } }]
+            messages: [{ text: { text: ['Błąd podczas wyszukiwania restauracji.'] } }]
           }
         });
       }
 
-      const list = nearby.map(r => `${r.name} — ok. ${r.distance_km.toFixed(1)} km`).join('\n');
+      if (!restaurants?.length) {
+        return res.status(200).json({
+          fulfillment_response: {
+            messages: [{ text: { text: ['Nie znalazłem żadnych restauracji w bazie danych.'] } }]
+          }
+        });
+      }
+
+      // Oblicz dystans do każdej restauracji i filtruj
+      const nearbyRestaurants = restaurants
+        .map(restaurant => {
+          const distance = distanceKm(userLat, userLon, restaurant.lat, restaurant.lng);
+          return {
+            ...restaurant,
+            distance_km: distance
+          };
+        })
+        .filter(restaurant => restaurant.distance_km <= radiusKm)
+        .sort((a, b) => a.distance_km - b.distance_km)
+        .slice(0, 3); // Weź tylko 3 najbliższe
+
+      if (!nearbyRestaurants.length) {
+        return res.status(200).json({
+          fulfillment_response: {
+            messages: [{ text: { text: [`Nie znalazłem nic w promieniu ${radiusKm} km.`] } }]
+          }
+        });
+      }
+
+      const list = nearbyRestaurants
+        .map(r => `Restauracja ${r.name} — ok. ${r.distance_km.toFixed(1)} km, adres ${r.address}`)
+        .join('\n');
 
       return res.status(200).json({
         fulfillment_response: {
-          messages: [{ text: { text: [`Oto ${p.dish_type || 'lokale'} w okolicy:\n${list}`] } }]
+          messages: [{ text: { text: [list] } }]
         },
-        session_info: { parameters: { restaurant_options: nearby } }
+        session_info: { parameters: { restaurant_options: nearbyRestaurants } }
       });
     }
 
