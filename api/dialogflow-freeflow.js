@@ -34,15 +34,38 @@ async function listRestaurants(req, res) {
   // Test z anon key - może service role nie ma uprawnień
   const { data, error } = await supabaseAnon.from("restaurants").select("id,name,address").limit(10);
   
-  const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
+  const restaurants = data || [];
+  const formattedList = restaurants.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
 
   // mapka numer→id do późniejszego wyboru
   const options_map = {};
-  (data||[]).forEach((r, i) => options_map[String(i+1)] = { restaurant_id: r.id });
+  restaurants.forEach((r, i) => options_map[String(i+1)] = { restaurant_id: r.id });
+
+  const responseText = `Jasne, znalazłem te miejsca: ${formattedList}`;
+
+  // Pełna ścieżka do Twojej encji @RestaurantName
+  const entityTypeId = "projects/primal-index-311413/locations/europe-west1/agents/2b40816b-cb06-43f7-b36e-712fcad6c0eb/entityTypes/516effbe-cd1c-4ac2-ba94-657f88ddf08a";
 
   return res.json({
-    sessionInfo: { parameters: { options_map } },
-    fulfillment_response: { messages: [{ text: { text: [lines || "Nie znaleziono lokali."] } }] }
+    // Odpowiedź tekstowa
+    fulfillment_response: {
+      messages: [{ text: { text: [responseText] } }]
+    },
+    // Zapisanie danych w pamięci i DYNAMICZNA AKTUALIZACJA ENCJI
+    session_info: {
+      parameters: {
+        restaurant_options: restaurants, // Zapisujemy całą listę, tak jak wcześniej
+        options_map // Zachowujemy mapkę numer→id
+      },
+      session_entity_types: [{
+        name: entityTypeId,
+        entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
+        entities: restaurants.map(r => ({
+          value: r.id,      // Używamy ID restauracji jako unikalnej wartości
+          synonyms: [r.name] // Nazwa restauracji jako synonim
+        }))
+      }]
+    }
   });
 }
 
