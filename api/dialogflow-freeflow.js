@@ -44,7 +44,7 @@ async function listMenu(req, res) {
   const dish = p.dish; // np. "capricciosa"
   const { data } = await supabase
     .from("menu_items")
-    .select("id,name,size_label,price_cents")
+    .select("id,name,price_cents,category")
     .eq("restaurant_id", restaurant_id)
     .ilike("name", `%${dish || ""}%`)
     .order("price_cents");
@@ -55,14 +55,14 @@ async function listMenu(req, res) {
     });
   }
 
-  const lines = data.map(m => `${m.name} ${m.size_label ?? ""} — ${(m.price_cents/100).toFixed(2)} zł`).join("\n");
-  // map rozmiar→id żeby łatwo wybrać
-  const sizes_map = {};
-  data.forEach(m => { if (m.size_label) sizes_map[m.size_label] = m.id; });
+  const lines = data.map(m => `${m.name} — ${(m.price_cents/100).toFixed(2)} zł`).join("\n");
+  // map nazwa→id żeby łatwo wybrać
+  const items_map = {};
+  data.forEach(m => { items_map[m.name] = m.id; });
 
   return res.json({
-    sessionInfo: { parameters: { restaurant_id, sizes_map } },
-    fulfillment_response: { messages: [{ text: { text: [lines + "\nJaki rozmiar?"] } }] }
+    sessionInfo: { parameters: { restaurant_id, items_map } },
+    fulfillment_response: { messages: [{ text: { text: [lines + "\nKtóre danie wybierasz?"] } }] }
   });
 }
 
@@ -70,9 +70,11 @@ async function createOrder(req, res) {
   const p = req.body?.sessionInfo?.parameters || {};
   const qty = Number(p.qty || 1);
 
-  // priorytet: size_label → id z sizes_map → fallback na pierwszy wynik
+  // priorytet: nazwa → id z items_map → fallback na bezpośredni menu_item_id
   let menu_item_id = p.menu_item_id;
-  if (!menu_item_id && p.size && p.sizes_map?.[p.size]) menu_item_id = p.sizes_map[p.size];
+  if (!menu_item_id && p.item_name && p.items_map?.[p.item_name]) {
+    menu_item_id = p.items_map[p.item_name];
+  }
 
   const { data: item } = await supabase.from("menu_items")
     .select("id,name,price_cents").eq("id", menu_item_id).single();
