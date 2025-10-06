@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
 async function listRestaurants(req, res) {
   const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
-  const { data } = await supabase.from("restaurants").select("id,name,address").ilike("city", city);
+  const { data } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${city}%`);
   const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
 
   // mapka numer→id do późniejszego wyboru
