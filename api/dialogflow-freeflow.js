@@ -6,6 +6,8 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 export default async function handler(req, res) {
   const { fulfillmentInfo, sessionInfo } = req.body || {};
   const tag = fulfillmentInfo?.tag;
+  
+  console.log('🚀 WEBHOOK HIT - tag:', tag, 'body:', JSON.stringify(req.body, null, 2));
 
   try {
     if (tag === "list_restaurants") return await listRestaurants(req, res);
@@ -25,6 +27,11 @@ async function listRestaurants(req, res) {
   console.log('🔍 LIST RESTAURANTS - city:', JSON.stringify(city));
   console.log('🔍 LIST RESTAURANTS - city length:', city.length);
   
+  // Test 1: Sprawdź czy w ogóle mamy dane
+  const { data: allData, error: allError } = await supabase.from("restaurants").select("id,name,address,city").limit(3);
+  console.log('🔍 LIST RESTAURANTS - all data test:', { allData, allError });
+  
+  // Test 2: Sprawdź czy ILIKE działa
   const { data, error } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${city}%`);
   console.log('🔍 LIST RESTAURANTS - query result:', { data, error });
   
