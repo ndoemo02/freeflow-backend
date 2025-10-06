@@ -11,6 +11,7 @@ export default async function handler(req, res) {
   console.log('🚀 WEBHOOK HIT - tag:', tag, 'body:', JSON.stringify(req.body, null, 2));
 
   try {
+    if (tag === "recommend_nearby") return await listRestaurants(req, res);
     if (tag === "list_restaurants") return await listRestaurants(req, res);
     if (tag === "list_menu") return await listMenu(req, res);
     if (tag === "create_order") return await createOrder(req, res);
