@@ -2,6 +2,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
+const supabaseAnon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 export default async function handler(req, res) {
   const { fulfillmentInfo, sessionInfo } = req.body || {};
@@ -31,12 +32,16 @@ async function listRestaurants(req, res) {
   const normalizedCity = city.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   console.log('🔍 LIST RESTAURANTS - normalized city:', JSON.stringify(normalizedCity));
   
-  // Test 1: Sprawdź czy w ogóle mamy dane
+  // Test 1: Sprawdź czy w ogóle mamy dane (service role)
   const { data: allData, error: allError } = await supabase.from("restaurants").select("id,name,address,city").limit(3);
-  console.log('🔍 LIST RESTAURANTS - all data test:', { allData, allError });
+  console.log('🔍 LIST RESTAURANTS - all data test (service):', { allData, allError });
   
-  // Test 2: Sprawdź czy ILIKE działa z znormalizowanym miastem
-  const { data, error } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${normalizedCity}%`);
+  // Test 2: Sprawdź czy anon key ma dostęp
+  const { data: allDataAnon, error: allErrorAnon } = await supabaseAnon.from("restaurants").select("id,name,address,city").limit(3);
+  console.log('🔍 LIST RESTAURANTS - all data test (anon):', { allDataAnon, allErrorAnon });
+  
+  // Test 3: Sprawdź czy EQ działa z znormalizowanym miastem
+  const { data, error } = await supabase.from("restaurants").select("id,name,address").eq("city", normalizedCity);
   console.log('🔍 LIST RESTAURANTS - query result:', { data, error });
   
   const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
