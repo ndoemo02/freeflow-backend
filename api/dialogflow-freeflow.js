@@ -48,7 +48,7 @@ async function listMenu(req, res) {
   const restaurant_id = p.restaurant_id || selected?.restaurant_id;
 
   const dish = p.dish; // np. "capricciosa"
-  const { data } = await supabase
+  const { data } = await supabaseAnon
     .from("menu_items")
     .select("id,name,price_cents,category")
     .eq("restaurant_id", restaurant_id)
@@ -82,7 +82,7 @@ async function createOrder(req, res) {
     menu_item_id = p.items_map[p.item_name];
   }
 
-  const { data: item } = await supabase.from("menu_items")
+  const { data: item } = await supabaseAnon.from("menu_items")
     .select("id,name,price_cents").eq("id", menu_item_id).single();
 
   if (!item) {
