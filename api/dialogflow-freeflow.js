@@ -20,21 +20,6 @@ export default async function handler(req, res) {
     return res.status(200).set(corsHeaders).end();
   }
 
-  // Health check
-  if (req.url === '/api/health') {
-    return res.status(200).json({
-      ok: true,
-      ts: new Date().toISOString()
-    });
-  }
-
-  // Version check
-  if (req.url === '/api/version') {
-    return res.status(200).json({
-      commit: process.env.VERCEL_GIT_COMMIT_SHA || 'local',
-      mode: 'minimal'
-    });
-  }
 
   try {
     const { sessionInfo, fulfillmentInfo } = req.body ?? {};
