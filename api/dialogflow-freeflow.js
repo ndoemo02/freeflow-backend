@@ -26,8 +26,8 @@ export default async function handler(req, res) {
 async function listRestaurants(req, res) {
   const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
   
-  // Prosty test - zwróć wszystkie restauracje bez filtrowania
-  const { data, error } = await supabase.from("restaurants").select("id,name,address").limit(10);
+  // Test z anon key - może service role nie ma uprawnień
+  const { data, error } = await supabaseAnon.from("restaurants").select("id,name,address").limit(10);
   
   const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
 
