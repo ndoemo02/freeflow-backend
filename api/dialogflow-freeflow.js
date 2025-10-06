@@ -22,7 +22,12 @@ export default async function handler(req, res) {
 
 async function listRestaurants(req, res) {
   const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
-  const { data } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${city}%`);
+  console.log('🔍 LIST RESTAURANTS - city:', JSON.stringify(city));
+  console.log('🔍 LIST RESTAURANTS - city length:', city.length);
+  
+  const { data, error } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${city}%`);
+  console.log('🔍 LIST RESTAURANTS - query result:', { data, error });
+  
   const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
 
   // mapka numer→id do późniejszego wyboru
