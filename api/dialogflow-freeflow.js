@@ -1,44 +1,107 @@
-// handler dla POST /api/dialogflow-freeflow
-import crypto from 'node:crypto';
+// /api/dialogflow-freeflow.ts
+import { createClient } from "@supabase/supabase-js";
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE);
 
 export default async function handler(req, res) {
+  const { fulfillmentInfo, sessionInfo } = req.body || {};
+  const tag = fulfillmentInfo?.tag;
+
   try {
-    const tag = req.body?.fulfillmentInfo?.tag || "UNKNOWN";
-    const p   = req.body?.sessionInfo?.parameters || {};
-
-    if (tag !== "create_order") {
-      return res.status(200).json({
-        fulfillment_response: {
-          messages: [{ text: { text: [`Tag ${tag} nieobsługiwany.`] } }]
-        }
-      });
-    }
-
-    const dish = String(p.dish || "pizza");
-    const qty  = Number(p.qty ?? 1) || 1;
-
-    const price = 31 * qty;
-    const items = `${qty}× ${dish[0].toUpperCase()}${dish.slice(1)}`;
-
-    return res.status(200).json({
-      sessionInfo: {
-        parameters: {
-          order_id: crypto.randomUUID(),
-          eta: "15–20 min",
-          price_total: `${price.toFixed(2)} zł`,
-          items_summary: items
-        }
-      },
-      fulfillment_response: {
-        messages: [{ text: { text: [`Zamówienie przyjęte. ${items}. Dostawa 15–20 min.`] } }]
-      }
-    });
+    if (tag === "list_restaurants") return await listRestaurants(req, res);
+    if (tag === "list_menu") return await listMenu(req, res);
+    if (tag === "create_order") return await createOrder(req, res);
+    return res.json({ fulfillment_response: { messages: [{ text: { text: ["Brak obsługi tagu."] } }] } });
   } catch (e) {
-    console.error("WEBHOOK ERROR", e, req.body); // zobaczysz w Vercel Logs
+    console.error("WEBHOOK ERROR", e, req.body);
     return res.status(200).json({
-      fulfillment_response: {
-        messages: [{ text: { text: ["OK, przyjąłem dane. Powiedz co chcesz zamówić."] } }]
-      }
+      fulfillment_response: { messages: [{ text: { text: ["Ups, błąd serwera. Spróbuj ponownie."] } }] }
     });
   }
+}
+
+async function listRestaurants(req, res) {
+  const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
+  const { data } = await supabase.from("restaurants").select("id,name,address").ilike("city", city);
+  const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
+
+  // mapka numer→id do późniejszego wyboru
+  const options_map = {};
+  (data||[]).forEach((r, i) => options_map[String(i+1)] = { restaurant_id: r.id });
+
+  return res.json({
+    sessionInfo: { parameters: { options_map } },
+    fulfillment_response: { messages: [{ text: { text: [lines || "Nie znaleziono lokali."] } }] }
+  });
+}
+
+async function listMenu(req, res) {
+  const p = req.body?.sessionInfo?.parameters || {};
+  // użytkownik mógł wskazać numer z listy
+  const selected = p?.selection && p?.options_map?.[p.selection];
+  const restaurant_id = p.restaurant_id || selected?.restaurant_id;
+
+  const dish = p.dish; // np. "capricciosa"
+  const { data } = await supabase
+    .from("menu_items")
+    .select("id,name,size_label,price_cents")
+    .eq("restaurant_id", restaurant_id)
+    .ilike("name", `%${dish || ""}%`)
+    .order("price_cents");
+
+  if (!data?.length) {
+    return res.json({
+      fulfillment_response: { messages: [{ text: { text: ["Nie znalazłem takiej pozycji w tej restauracji."] } }] }
+    });
+  }
+
+  const lines = data.map(m => `${m.name} ${m.size_label ?? ""} — ${(m.price_cents/100).toFixed(2)} zł`).join("\n");
+  // map rozmiar→id żeby łatwo wybrać
+  const sizes_map = {};
+  data.forEach(m => { if (m.size_label) sizes_map[m.size_label] = m.id; });
+
+  return res.json({
+    sessionInfo: { parameters: { restaurant_id, sizes_map } },
+    fulfillment_response: { messages: [{ text: { text: [lines + "\nJaki rozmiar?"] } }] }
+  });
+}
+
+async function createOrder(req, res) {
+  const p = req.body?.sessionInfo?.parameters || {};
+  const qty = Number(p.qty || 1);
+
+  // priorytet: size_label → id z sizes_map → fallback na pierwszy wynik
+  let menu_item_id = p.menu_item_id;
+  if (!menu_item_id && p.size && p.sizes_map?.[p.size]) menu_item_id = p.sizes_map[p.size];
+
+  const { data: item } = await supabase.from("menu_items")
+    .select("id,name,price_cents").eq("id", menu_item_id).single();
+
+  if (!item) {
+    return res.json({ fulfillment_response: { messages: [{ text: { text: ["Nie mam kompletnej pozycji menu."] } }] } });
+  }
+
+  const subtotal = item.price_cents * qty;
+  const { data: order } = await supabase
+    .from("orders")
+    .insert({ restaurant_id: p.restaurant_id, subtotal_cents: subtotal, total_cents: subtotal, status: "new", eta: "15–20 min" })
+    .select("id,eta,total_cents").single();
+
+  await supabase.from("order_items").insert({
+    order_id: order.id, menu_item_id: item.id, name: item.name, unit_price_cents: item.price_cents, qty
+  });
+
+  return res.json({
+    sessionInfo: {
+      parameters: {
+        order_id: order.id,
+        eta: order.eta,
+        price_total: `${(order.total_cents/100).toFixed(2)} zł`,
+        items_summary: `${qty}× ${item.name}`
+      }
+    },
+    fulfillment_response: {
+      messages: [{ text: { text: [`Zamówienie przyjęte. ${qty}× ${item.name}. Dostawa ${order.eta}.`] } }]
+    }
+  });
 }
