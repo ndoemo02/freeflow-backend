@@ -29,6 +29,8 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    console.log('🔍 BODY FROM DIALOGFLOW:', JSON.stringify(req.body, null, 2));
+
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
     const tag = body?.fulfillmentInfo?.tag || '';
     const p = body?.sessionInfo?.parameters || {};
