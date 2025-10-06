@@ -173,13 +173,27 @@ export default async function handler(req, res) {
         event: 'accepted'
       });
 
-      const zl = v => (v / 100).toFixed(2).replace('.', ',') + ' zł';
-      const msg = `Zamówienie #${ord.id} przyjęte: ${qty} × ${mi.name}. Suma: ${zl(total)}. Czas dostawy: ${ord.eta}.`;
+      // Parsuj ETA string do min/max
+      const etaMatch = ord.eta.match(/(\d+)–(\d+) min/);
+      const etaMin = etaMatch ? etaMatch[1] : '15';
+      const etaMax = etaMatch ? etaMatch[2] : '20';
 
-      return res.status(200).json({
-        fulfillment_response: { messages: [{ text: { text: [msg] } }] },
-        session_info: { parameters: { order_id: ord.id, eta: ord.eta } }
-      });
+      const response = {
+        sessionInfo: {
+          parameters: {
+            order_id: ord.id,                 // UUID
+            eta: `${etaMin}–${etaMax} min`,
+            price_total: (total / 100).toFixed(2) + ' zł',
+            items_summary: `${qty}× ${mi.name}`
+          }
+        },
+        fulfillment_response: {
+          messages: [
+            { text: { text: [ `Zamówienie przyjęte. ${qty}× ${mi.name}. Dostawa ${etaMin}–${etaMax} min.` ] } }
+          ]
+        }
+      };
+      return res.status(200).json(response);
     }
 
     // 🔹 Fallback
