@@ -27,12 +27,16 @@ async function listRestaurants(req, res) {
   console.log('🔍 LIST RESTAURANTS - city:', JSON.stringify(city));
   console.log('🔍 LIST RESTAURANTS - city length:', city.length);
   
+  // Normalizuj znaki - usuń dziwne znaki i spacje
+  const normalizedCity = city.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  console.log('🔍 LIST RESTAURANTS - normalized city:', JSON.stringify(normalizedCity));
+  
   // Test 1: Sprawdź czy w ogóle mamy dane
   const { data: allData, error: allError } = await supabase.from("restaurants").select("id,name,address,city").limit(3);
   console.log('🔍 LIST RESTAURANTS - all data test:', { allData, allError });
   
-  // Test 2: Sprawdź czy ILIKE działa
-  const { data, error } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${city}%`);
+  // Test 2: Sprawdź czy ILIKE działa z znormalizowanym miastem
+  const { data, error } = await supabase.from("restaurants").select("id,name,address").ilike("city", `%${normalizedCity}%`);
   console.log('🔍 LIST RESTAURANTS - query result:', { data, error });
   
   const lines = (data||[]).map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
