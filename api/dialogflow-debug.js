@@ -1,13 +1,14 @@
 export default async function handler(req, res) {
   try {
     console.log("🧠 Debug Webhook hit:", req.method);
-    const raw = await req.text();
-    console.log("📦 Raw body:", raw);
+    console.log("📦 Raw body:", JSON.stringify(req.body, null, 2));
+    console.log("📦 Body type:", typeof req.body);
 
     return res.status(200).json({
       message: "OK",
       method: req.method,
-      rawBody: raw,
+      body: req.body,
+      bodyType: typeof req.body,
     });
   } catch (err) {
     console.error("❌ Debug error:", err);
