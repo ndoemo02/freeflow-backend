@@ -24,6 +24,8 @@ function distanceKm(lat1, lon1, lat2, lon2) {
 }
 
 export default async function handler(req, res) {
+  console.log('Webhook hit:', req.method, req.body);
+  
   try {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
