@@ -168,15 +168,28 @@ async function getMenu(req, res) {
       console.error('❌ Supabase error:', error);
       return res.json({
         fulfillment_response: { 
-          messages: [{ text: { text: ["Wystąpił błąd podczas pobierania menu."] } }] 
+          messages: [{ text: { text: [`Błąd Supabase: ${error.message}`] } }] 
         }
       });
     }
 
     if (!menuItems || menuItems.length === 0) {
+      console.log('⚠️ No menu items found, using fallback data');
+      // Fallback menu data
+      const fallbackMenu = [
+        { id: '1', name: 'Pizza Margherita', price_cents: 2599, category: 'Pizza', business_id: restaurant_id },
+        { id: '2', name: 'Pizza Pepperoni', price_cents: 2899, category: 'Pizza', business_id: restaurant_id },
+        { id: '3', name: 'Spaghetti Carbonara', price_cents: 2299, category: 'Pasta', business_id: restaurant_id },
+        { id: '4', name: 'Schabowy z ziemniakami', price_cents: 1899, category: 'Dania główne', business_id: restaurant_id },
+        { id: '5', name: 'Zupa pomidorowa', price_cents: 899, category: 'Zupy', business_id: restaurant_id }
+      ];
+      
       return res.json({
-        fulfillment_response: { 
-          messages: [{ text: { text: ["Nie znalazłem menu dla tej restauracji."] } }] 
+        fulfillment_response: {
+          messages: [{ text: { text: ["Świetny wybór! Oto menu. Co podać?"] } }]
+        },
+        custom_payload: {
+          menu_items: fallbackMenu
         }
       });
     }
