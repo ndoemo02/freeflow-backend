@@ -79,6 +79,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
+        console.log('🧩 DEBUG: req.body.sessionInfo =', JSON.stringify(req.body.sessionInfo, null, 2));
         let { restaurant_name } = params || {};
 
         let mapRaw = params?.restaurant_name_to_id;
