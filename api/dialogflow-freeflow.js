@@ -21,6 +21,7 @@ export default async function handler(req, res) {
     if (tag === "list_restaurants") return await listRestaurants(req, res);
     if (tag === "list_menu") return await listMenu(req, res);
     if (tag === "get_menu") return await getMenu(req, res);
+    if (tag === "select_restaurant") return await selectRestaurant(req, res);
     if (tag === "create_order") return await createOrder(req, res);
     console.log('❌ UNKNOWN TAG:', tag);
     return res.json({ fulfillment_response: { messages: [{ text: { text: ["Brak obsługi tagu."] } }] } });
@@ -185,17 +186,62 @@ async function getMenuForRestaurant(restaurantId) {
   return menuItems;
 }
 
+async function selectRestaurant(req, res) {
+  try {
+    console.log('🎯 SELECT_RESTAURANT HIT!');
+    
+    const selectedName = req.body?.sessionInfo?.parameters?.RestaurantName;
+    console.log('🍽️ Selected restaurant name:', selectedName);
+    
+    // Pobierz mapę nazwa→ID z parametrów sesji (zapisana przez recommend_nearby)
+    const nameToIdMap = req.body?.sessionInfo?.parameters?.restaurant_name_to_id || {};
+    console.log('🗺️ Name to ID map:', nameToIdMap);
+    
+    const restaurant_id = nameToIdMap[selectedName];
+    
+    if (!restaurant_id) {
+      console.log('❌ Restaurant not found in map:', selectedName);
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie."] } }]
+        }
+      });
+    }
+
+    console.log('✅ Found restaurant ID:', restaurant_id);
+
+    return res.json({
+      sessionInfo: {
+        parameters: {
+          restaurant_id: restaurant_id
+        }
+      },
+      fulfillment_response: {
+        messages: [{ text: { text: [`Wybrano: ${selectedName}`] } }]
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ selectRestaurant error:', error);
+    return res.json({
+      fulfillment_response: { 
+        messages: [{ text: { text: ["Wystąpił błąd podczas wyboru restauracji."] } }] 
+      }
+    });
+  }
+}
+
 async function getMenu(req, res) {
   try {
     // Debug: sprawdź wszystkie parametry sesji
     console.log('🔍 All session parameters:', req.body?.sessionInfo?.parameters);
     
-    // 1. Pobierz ID restauracji z parametrów sesji (intencja SelectByName zapisuje w RestaurantName)
-    let restaurantId = req.body?.sessionInfo?.parameters?.RestaurantName;
+    // 1. Pobierz ID restauracji z parametrów sesji (zapisane przez select_restaurant)
+    let restaurantId = req.body?.sessionInfo?.parameters?.restaurant_id;
     
-    console.log('🍽️ RestaurantName parameter:', restaurantId);
+    console.log('🍽️ Restaurant ID parameter:', restaurantId);
     
-    // 2. Jeśli nie ma bezpośredniego ID, spróbuj znaleźć przez mapę nazwa→ID
+    // 2. Fallback: spróbuj znaleźć przez mapę nazwa→ID (dla kompatybilności)
     if (!restaurantId) {
       const restaurantName = req.body?.sessionInfo?.parameters?.RestaurantName;
       const nameToIdMap = req.body?.sessionInfo?.parameters?.restaurant_name_to_id || {};
