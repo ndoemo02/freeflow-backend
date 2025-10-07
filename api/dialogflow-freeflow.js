@@ -72,6 +72,11 @@ async function listRestaurants(req, res) {
         options_map: restaurantList.reduce((map, r, i) => {
           map[String(i+1)] = { restaurant_id: r.id };
           return map;
+        }, {}),
+        // Dodaj mapę nazwa→ID dla łatwego wyszukiwania
+        restaurant_name_to_id: restaurantList.reduce((map, r) => {
+          map[r.name] = r.id;
+          return map;
         }, {})
       },
       session_entity_types: [{
@@ -186,13 +191,27 @@ async function getMenu(req, res) {
     console.log('🔍 All session parameters:', req.body?.sessionInfo?.parameters);
     
     // 1. Pobierz ID restauracji z parametrów sesji (intencja SelectByName zapisuje w RestaurantName)
-    const restaurantId = req.body?.sessionInfo?.parameters?.RestaurantName;
+    let restaurantId = req.body?.sessionInfo?.parameters?.RestaurantName;
     
     console.log('🍽️ RestaurantName parameter:', restaurantId);
     
-    // 2. Sprawdź czy ID restauracji zostało znalezione
+    // 2. Jeśli nie ma bezpośredniego ID, spróbuj znaleźć przez mapę nazwa→ID
     if (!restaurantId) {
-      console.log('❌ No RestaurantName found in parameters');
+      const restaurantName = req.body?.sessionInfo?.parameters?.RestaurantName;
+      const nameToIdMap = req.body?.sessionInfo?.parameters?.restaurant_name_to_id || {};
+      
+      console.log('🔍 Restaurant name from parameters:', restaurantName);
+      console.log('🗺️ Name to ID map:', nameToIdMap);
+      
+      if (restaurantName && nameToIdMap[restaurantName]) {
+        restaurantId = nameToIdMap[restaurantName];
+        console.log('✅ Found restaurant ID from name map:', restaurantId);
+      }
+    }
+    
+    // 3. Sprawdź czy ID restauracji zostało znalezione
+    if (!restaurantId) {
+      console.log('❌ No restaurant ID found in parameters');
       
       // Fallback: spróbuj znaleźć restaurację po nazwie w tekście użytkownika
       const userText = req.body?.queryResult?.queryText || '';
