@@ -78,50 +78,29 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
-        const { restaurant_name, RestaurantName, restaurant_name_to_id } = params || {};
-        const name = restaurant_name || RestaurantName;
-        const map = restaurant_name_to_id || {};
+        const { restaurant_name, restaurant_name_to_id } = params || {};
 
-        console.log("🍽️  Parametry sesji:", JSON.stringify(params, null, 2));
-        console.log("🍽️  Nazwa restauracji:", name);
-        console.log("🍽️  Mapa:", map);
-
-        if (!restaurant_name_to_id || !name) {
+        if (!restaurant_name_to_id || !restaurant_name) {
+          console.warn("Brak mapy restauracji w sesji:", params);
           return res.json({
             fulfillment_response: {
               messages: [
-                { text: { text: ["Brak ID restauracji w sesji."] } }
+                { text: { text: ["Nie udało się zidentyfikować restauracji."] } }
               ]
             }
           });
         }
 
-        const restaurantId = map[name.toLowerCase()];
-        console.log("🍽️  Wybrano:", name, "→", restaurantId);
-
-        if (!restaurantId) {
-          return res.json({
-            fulfillment_response: {
-              messages: [
-                { text: { text: [`Nie udało się zidentyfikować wybranej restauracji "${name}". Spróbuj ponownie.`] } }
-              ]
-            }
-          });
-        }
+        const restaurantId = restaurant_name_to_id[restaurant_name.toLowerCase()];
+        console.log(`Wybrano: ${restaurant_name} → ${restaurantId}`);
 
         return res.json({
           sessionInfo: {
-            parameters: {
-              restaurant_id: restaurantId,
-              restaurant_name: name,
-              last_restaurant_list: params.last_restaurant_list,
-              restaurant_name_to_id: params.restaurant_name_to_id,
-              last_update_ts: Date.now() // odśwież sesję
-            }
+            parameters: { restaurant_id: restaurantId }
           },
           fulfillment_response: {
             messages: [
-              { text: { text: [`Wybrano restaurację ${name}. ID: ${restaurantId}`] } }
+              { text: { text: [`Wybrano restaurację ${restaurant_name}.`] } }
             ]
           }
         });
