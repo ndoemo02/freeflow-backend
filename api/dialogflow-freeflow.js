@@ -158,11 +158,17 @@ async function createOrder(req, res) {
 
 async function getMenu(req, res) {
   try {
-    // 1. Pobierz restaurant_id z parametrów sesji
-    const restaurantId = req.body?.sessionInfo?.parameters?.restaurant_id;
+    // Debug: sprawdź wszystkie parametry sesji
+    console.log('🔍 All session parameters:', req.body?.sessionInfo?.parameters);
+    
+    // 1. Pobierz ID restauracji z parametrów sesji (intencja SelectByName zapisuje w RestaurantName)
+    const restaurantId = req.body?.sessionInfo?.parameters?.RestaurantName;
+    
+    console.log('🍽️ RestaurantName parameter:', restaurantId);
     
     // 2. Sprawdź czy ID restauracji zostało znalezione
     if (!restaurantId) {
+      console.log('❌ No RestaurantName found in parameters');
       return res.json({
         fulfillment_response: { 
           messages: [{ text: { text: ["Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie."] } }] 
