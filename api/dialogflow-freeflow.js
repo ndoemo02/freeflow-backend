@@ -65,8 +65,8 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           custom_payload: { restaurants },
           sessionInfo: {
             parameters: {
-              last_restaurant_list: restaurants,
-              restaurant_name_to_id: nameToId,
+              last_restaurant_list: restaurants.map(r => r.name),
+              restaurant_name_to_id: JSON.stringify(nameToId), // 👈 zapisz jako string
               last_update_ts: Date.now() // tylko po to, żeby odświeżał sesję
             },
           },
@@ -78,7 +78,15 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
-        const { restaurant_name, restaurant_name_to_id } = params || {};
+        let { restaurant_name, restaurant_name_to_id } = params || {};
+
+        if (restaurant_name_to_id && typeof restaurant_name_to_id === 'string') {
+          try {
+            restaurant_name_to_id = JSON.parse(restaurant_name_to_id);
+          } catch (err) {
+            console.error("Błąd parsowania mapy restauracji:", err);
+          }
+        }
 
         if (!restaurant_name_to_id || !restaurant_name) {
           console.warn("Brak mapy restauracji w sesji:", params);
@@ -91,7 +99,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
-        const restaurantId = restaurant_name_to_id[restaurant_name.toLowerCase()];
+        const restaurantId = restaurant_name_to_id?.[restaurant_name?.toLowerCase()] || null;
         console.log(`Wybrano: ${restaurant_name} → ${restaurantId}`);
 
         return res.json({
