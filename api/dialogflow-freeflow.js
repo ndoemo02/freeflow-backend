@@ -106,7 +106,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           console.log('⚠️ Brak ID w mapie dla:', restaurantName);
           return res.json({
             fulfillment_response: {
-              messages: [{ text: { text: [`Nie udało się zidentyfikować restauracji "${restaurantName}".`] } }]
+              messages: [{ text: { text: ["Nie udało się znaleźć tej restauracji, bajtlu!"] } }]
             }
           });
         }
@@ -114,7 +114,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         console.log(`✅ Wybrano: ${restaurantName} → ${restaurantId}`);
         return res.json({
           fulfillment_response: {
-            messages: [{ text: { text: [`Wybrano restaurację ${restaurantName}.`] } }]
+            messages: [{ text: { text: [`Wybrano restaurację ${restaurantName}. Co chcesz zamówić?`] } }]
           },
           sessionInfo: {
             parameters: {
