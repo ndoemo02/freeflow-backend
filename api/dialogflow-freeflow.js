@@ -147,7 +147,7 @@ async function createOrder(req, res) {
 
     console.log(`🔍 Szukam pozycji menu: ${item_name} (${itemId})`);
 
-    const { data: menuItem, error: menuErr } = await supabase
+    const { data: menuItem, error: menuErr } = await supabaseAnon
       .from('menu_items')
       .select('id, name, price, restaurant_id')
       .eq('id', itemId)
@@ -165,7 +165,7 @@ async function createOrder(req, res) {
       created_at: new Date().toISOString(),
     };
 
-    const { data: insertedOrder, error: orderErr } = await supabase
+    const { data: insertedOrder, error: orderErr } = await supabaseAnon
       .from('orders')
       .insert(order)
       .select()
@@ -173,7 +173,7 @@ async function createOrder(req, res) {
 
     if (orderErr) throw new Error(`Nie udało się utworzyć zamówienia: ${orderErr.message}`);
 
-    await supabase
+    await supabaseAnon
       .from('order_items')
       .insert({
         order_id: insertedOrder.id,
