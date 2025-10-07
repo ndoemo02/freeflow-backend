@@ -23,6 +23,7 @@ export default async function handler(req, res) {
     if (tag === "get_menu") return await getMenu(req, res);
     if (tag === "select_restaurant") return await selectRestaurant(req, res);
     if (tag === "create_order") return await createOrder(req, res);
+    if (tag === "diag_menu_probe") return await diagMenuProbe(req, res);
     console.log('❌ UNKNOWN TAG:', tag);
     return res.json({ fulfillment_response: { messages: [{ text: { text: ["Brak obsługi tagu."] } }] } });
   } catch (e) {
@@ -125,8 +126,12 @@ async function listMenu(req, res) {
 
 async function createOrder(req, res) {
   try {
-    const p = req.body?.sessionInfo?.parameters || {};
-    const qty = Math.max(1, Number(p.qty || 1));
+    // Patch defensywny - akceptuj różne nazwy pól
+    const P = req.body?.sessionInfo?.parameters
+           || req.body?.session_info?.parameters
+           || {};
+
+    const qty = Math.max(1, Number(P.qty || 1));
 
     // 0) Sanity check env (bez logowania wartości!)
     const hasServiceRole = !!(process.env.SUPABASE_SERVICE_ROLE && process.env.SUPABASE_SERVICE_ROLE.length > 20);
@@ -135,36 +140,31 @@ async function createOrder(req, res) {
     }
 
     // Debug: loguj parametry sesji
-    console.log("createOrder params:", JSON.stringify(req.body?.sessionInfo?.parameters, null, 2));
+    console.log("createOrder params snapshot:", JSON.stringify(req.body?.sessionInfo?.parameters, null, 2));
 
-    // 1) Ustal menu_item_id
-    let menu_item_id = p.menu_item_id;
-    if (!menu_item_id && p.item_name && p.items_map && typeof p.items_map === "object") {
-      // dopasowanie case-insensitive po kluczu
-      const key = Object.keys(p.items_map).find(
-        k => String(k).toLowerCase() === String(p.item_name).toLowerCase()
-      );
-      if (key) menu_item_id = p.items_map[key];
-    }
+    // 1) Ustal parametry z różnych możliwych nazw pól
+    const restaurant_id =
+      P.restaurant_id || P.RestaurantId || P.restaurantId || P.restaurant ||
+      (P.restaurant_name_to_id && P.RestaurantName && P.restaurant_name_to_id[P.RestaurantName]);
+
+    let item_name =
+      P.item_name || P.item || P.dish || P.menu_item || P.name;
+
+    let menu_item_id =
+      (typeof P.menu_item_id === "string" ? P.menu_item_id : null) ||
+      (P.items_map && item_name && P.items_map[item_name]) || null;
 
     // sanity: usuń nadmiarowe cudzysłowy i spacje
     if (typeof menu_item_id === "string") {
       menu_item_id = menu_item_id.trim().replace(/^"+|"+$/g, "");
     }
 
-    if (!menu_item_id && !p.item_name) {
+    if (!menu_item_id && !item_name) {
       return res.json({
         fulfillment_response: {
           messages: [{ text: { text: ["Nie mam kompletnej pozycji menu (brak nazwy i ID)."] } }]
         }
       });
-    }
-
-    // 2) Ustal restaurant_id
-    let restaurant_id = p.restaurant_id;
-    if (!restaurant_id && p.restaurant_name_to_id && p.RestaurantName) {
-      const idFromName = p.restaurant_name_to_id[p.RestaurantName];
-      if (idFromName) restaurant_id = idFromName;
     }
 
     if (!restaurant_id) {
@@ -192,13 +192,13 @@ async function createOrder(req, res) {
       }
     }
 
-    if (!item && p.item_name) {
+    if (!item && item_name) {
       // Fallback: szukaj po nazwie + restauracji (case-insensitive)
       const { data, error } = await supabase
         .from("menu_items")
         .select("id,name,price_cents,price,restaurant_id")
         .eq("restaurant_id", restaurant_id)
-        .ilike("name", String(p.item_name).trim())   // dokładny ilike
+        .ilike("name", String(item_name).trim())   // dokładny ilike
         .maybeSingle();
 
       if (error) {
@@ -210,7 +210,7 @@ async function createOrder(req, res) {
           .from("menu_items")
           .select("id,name,price_cents,price,restaurant_id")
           .eq("restaurant_id", restaurant_id)
-          .ilike("name", `%${String(p.item_name).trim()}%`)
+          .ilike("name", `%${String(item_name).trim()}%`)
           .order("name")
           .limit(1);
         if (err2) {
@@ -510,3 +510,20 @@ async function getMenu(req, res) {
     });
   }
 }
+
+async function diagMenuProbe(req, res) {
+  try {
+    const id = String(req.body?.sessionInfo?.parameters?.probe_id || "").trim().replace(/^"+|"+$/g, "");
+    const { data, error } = await supabase
+      .from("menu_items")
+      .select("id,name,restaurant_id,price,price_cents")
+      .eq("id", id)
+      .single();
+    return res.json({ ok: !!data, error: error?.message || null, item: data || null });
+  } catch (e) {
+    console.error("diagMenuProbe error:", e);
+    return res.json({ ok: false, error: e.message, item: null });
+  }
+}
+
+export default handler;
