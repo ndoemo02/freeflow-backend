@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     if (tag === "list_restaurants") return await listRestaurants(req, res);
     if (tag === "list_menu") return await listMenu(req, res);
     if (tag === "get_menu") return await getMenu(req, res);
-    if (tag === "select_restaurant") return await selectRestaurant(req, res);
+    if (tag === "select_restaurant") return await selectRestaurant(res, req.body?.sessionInfo?.parameters || {}, req);
     if (tag === "create_order") return await createOrder(req, res);
     if (tag === "diag_menu_probe") return await diagMenuProbe(req, res);
     console.log('❌ UNKNOWN TAG:', tag);
@@ -225,13 +225,19 @@ async function getMenuForRestaurant(restaurantId) {
   return menuItems;
 }
 
-async function selectRestaurant(req, res) {
-  const p = req.body?.sessionInfo?.parameters || {};
-  const name = p.RestaurantName?.trim();
+async function selectRestaurant(res, p, req) {
+  const userText =
+    req.body?.text || req.body?.queryResult?.queryText || "";
+  const name =
+    p.RestaurantName?.trim() ||
+    userText.trim() ||
+    Object.keys(p.restaurant_name_to_id || {})[0];
+
+  const map = p.restaurant_name_to_id || {};
   const id =
-    p.restaurant_name_to_id?.[name] ||
-    Object.entries(p.restaurant_name_to_id || {}).find(([k]) =>
-      k.toLowerCase().includes(name?.toLowerCase())
+    map[name] ||
+    Object.entries(map).find(([k]) =>
+      k.toLowerCase().includes(name.toLowerCase())
     )?.[1];
 
   if (!id) {
@@ -241,7 +247,7 @@ async function selectRestaurant(req, res) {
           {
             text: {
               text: [
-                `Nie udało się zidentyfikować restauracji "${name}". Spróbuj ponownie.`,
+                `Nie udało się zidentyfikować restauracji "${name || "brak" }". Spróbuj ponownie.`,
               ],
             },
           },
@@ -250,6 +256,7 @@ async function selectRestaurant(req, res) {
     });
   }
 
+  console.log("✅ Wybrano restaurację:", name, "→", id);
   return res.status(200).json({
     fulfillment_response: {
       messages: [{ text: { text: [`Wybrano: ${name}`] } }],
