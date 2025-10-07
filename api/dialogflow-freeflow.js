@@ -78,33 +78,46 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
-        const name = params.restaurant_name?.toLowerCase();
-        const map = params.restaurant_name_to_id || {};
-        const id = map[name];
+        const { restaurant_name, RestaurantName, restaurant_name_to_id } = params || {};
+        const name = restaurant_name || RestaurantName;
+        const map = restaurant_name_to_id || {};
 
-        console.log("🍽️  Wybór:", name, "→", id);
+        console.log("🍽️  Parametry sesji:", JSON.stringify(params, null, 2));
+        console.log("🍽️  Nazwa restauracji:", name);
+        console.log("🍽️  Mapa:", map);
 
-        if (!id) {
+        if (!restaurant_name_to_id || !name) {
           return res.json({
             fulfillment_response: {
               messages: [
-                {
-                  text: {
-                    text: [
-                      `Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie.`,
-                    ],
-                  },
-                },
-              ],
-            },
+                { text: { text: ["Brak ID restauracji w sesji."] } }
+              ]
+            }
+          });
+        }
+
+        const restaurantId = map[name.toLowerCase()];
+        console.log("🍽️  Wybrano:", name, "→", restaurantId);
+
+        if (!restaurantId) {
+          return res.json({
+            fulfillment_response: {
+              messages: [
+                { text: { text: [`Nie udało się zidentyfikować wybranej restauracji "${name}". Spróbuj ponownie.`] } }
+              ]
+            }
           });
         }
 
         return res.json({
-          fulfillment_response: {
-            messages: [{ text: { text: [`Wybrano: ${params.restaurant_name}`] } }],
+          sessionInfo: {
+            parameters: { restaurant_id: restaurantId }
           },
-          sessionInfo: { parameters: { restaurant_id: id } },
+          fulfillment_response: {
+            messages: [
+              { text: { text: [`Wybrano restaurację ${name}. ID: ${restaurantId}`] } }
+            ]
+          }
         });
       }
 
