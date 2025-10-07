@@ -55,8 +55,9 @@ async function listRestaurants(req, res) {
   const restaurantList = restaurants || [];
   const formattedList = restaurantList.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
   
-  // Pełna ścieżka do encji @RestaurantName
-  const entityTypeId = "projects/primal-index-311413/locations/europe-west1/agents/2b40816b-cb06-43f7-b36e-712fcad6c0eb/entityTypes/516effbe-cd1c-4ac2-ba94-657f88ddf08a";
+  // Dynamiczna ścieżka do encji @RestaurantName z sesji
+  const sessionPath = req.body?.sessionInfo?.session || "";
+  const entityTypeId = `${sessionPath}/entityTypes/RestaurantName`;
 
   return res.json({
     // a. fulfillment_response - wiadomość tekstowa dla użytkownika
@@ -87,7 +88,7 @@ async function listRestaurants(req, res) {
       },
       sessionEntityTypes: [{
         name: entityTypeId,
-        entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
+        entityOverrideMode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
         entities: restaurantList.map(r => ({
           value: r.name,    // ✅ Używamy nazwy restauracji jako wartości
           synonyms: [r.name]
