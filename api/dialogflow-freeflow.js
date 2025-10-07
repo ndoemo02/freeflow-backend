@@ -66,8 +66,8 @@ async function listRestaurants(req, res) {
     custom_payload: {
       restaurants: restaurantList
     },
-    // c. session_info.session_entity_types - dynamiczna aktualizacja encji
-    session_info: {
+    // c. sessionInfo.sessionEntityTypes - dynamiczna aktualizacja encji
+    sessionInfo: {
       parameters: {
         restaurant_options: restaurantList,
         options_map: restaurantList.reduce((map, r, i) => {
@@ -80,7 +80,7 @@ async function listRestaurants(req, res) {
           return map;
         }, {})
       },
-      session_entity_types: [{
+      sessionEntityTypes: [{
         name: entityTypeId,
         entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
         entities: restaurantList.map(r => ({
@@ -124,53 +124,125 @@ async function listMenu(req, res) {
 }
 
 async function createOrder(req, res) {
-  const p = req.body?.sessionInfo?.parameters || {};
-  const qty = Number(p.qty || 1);
+  try {
+    const p = req.body?.sessionInfo?.parameters || {};
+    const qty = Math.max(1, Number(p.qty || 1));
 
-  console.log('🛒 createOrder parameters:', p);
-  console.log('🛒 item_name:', p.item_name);
-  console.log('🛒 items_map:', p.items_map);
-
-  // priorytet: nazwa → id z items_map → fallback na bezpośredni menu_item_id
-  let menu_item_id = p.menu_item_id;
-  if (!menu_item_id && p.item_name && p.items_map?.[p.item_name]) {
-    menu_item_id = p.items_map[p.item_name];
-    console.log('🛒 Found menu_item_id from items_map:', menu_item_id);
-  }
-
-  const { data: item, error } = await supabase.from("menu_items")
-    .select("id,name,price").eq("id", menu_item_id).single();
-
-  console.log('🛒 Supabase query result:', { item, error, menu_item_id });
-
-  if (!item) {
-    console.log('❌ No item found for menu_item_id:', menu_item_id);
-    return res.json({ fulfillment_response: { messages: [{ text: { text: ["Nie mam kompletnej pozycji menu."] } }] } });
-  }
-
-  const subtotal = item.price * 100 * qty; // Konwertuj złotówki na grosze
-  const { data: order } = await supabase
-    .from("orders")
-    .insert({ restaurant_id: p.restaurant_id, subtotal_cents: subtotal, total_cents: subtotal, status: "new", eta: "15–20 min" })
-    .select("id,eta,total_cents").single();
-
-  await supabase.from("order_items").insert({
-    order_id: order.id, menu_item_id: item.id, name: item.name, unit_price_cents: item.price * 100, qty
-  });
-
-  return res.json({
-    sessionInfo: {
-      parameters: {
-        order_id: order.id,
-        eta: order.eta,
-        price_total: `${(order.total_cents/100).toFixed(2)} zł`,
-        items_summary: `${qty}× ${item.name}`
-      }
-    },
-    fulfillment_response: {
-      messages: [{ text: { text: [`Zamówienie przyjęte. ${qty}× ${item.name}. Dostawa ${order.eta}.`] } }]
+    // 1) Ustal menu_item_id (priorytet: explicit id -> mapka -> brak)
+    let menu_item_id = p.menu_item_id;
+    if (!menu_item_id && p.item_name && p.items_map && typeof p.items_map === 'object') {
+      // dopasowanie po nazwie (case-insensitive)
+      const foundKey = Object.keys(p.items_map).find(k => k.toLowerCase() === String(p.item_name).toLowerCase());
+      if (foundKey) menu_item_id = p.items_map[foundKey];
     }
-  });
+
+    if (!menu_item_id) {
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Nie mam kompletnej pozycji menu (brak menu_item_id / items_map)."] } }]
+        }
+      });
+    }
+
+    // 2) Pobierz pozycję menu – użyj roli, która ma dostęp do odczytu (anon OK),
+    //    ale jeżeli masz RLS, w razie problemu przełącz na `supabase` (service role)
+    const { data: item, error: itemErr } = await supabaseAnon
+      .from("menu_items")
+      .select("id,name,price_cents,price,restaurant_id")
+      .eq("id", menu_item_id)
+      .single();
+
+    if (itemErr || !item) {
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Nie znalazłem pozycji menu o podanym ID."] } }]
+        }
+      });
+    }
+
+    // 3) Normalizacja ceny: grosze (preferuj price_cents; fallback: price * 100)
+    const unit_price_cents = (item.price_cents != null)
+      ? Number(item.price_cents)
+      : Math.round(Number(item.price) * 100);
+
+    if (!Number.isFinite(unit_price_cents)) {
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Pozycja menu ma nieprawidłową cenę."] } }]
+        }
+      });
+    }
+
+    // 4) Ustal restaurant_id (z paramów lub z pozycji)
+    const restaurant_id = p.restaurant_id || item.restaurant_id;
+    if (!restaurant_id) {
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Brakuje restaurant_id do złożenia zamówienia."] } }]
+        }
+      });
+    }
+
+    // 5) Policz sumy i zapisz zamówienie (użyj service role do INSERT)
+    const subtotal_cents = unit_price_cents * qty;
+
+    const { data: order, error: orderErr } = await supabase
+      .from("orders")
+      .insert({
+        restaurant_id,
+        subtotal_cents,
+        total_cents: subtotal_cents,
+        status: "new",
+        eta: "15–20 min"
+      })
+      .select("id,eta,total_cents")
+      .single();
+
+    if (orderErr || !order) {
+      return res.json({
+        fulfillment_response: { messages: [{ text: { text: ["Nie udało się utworzyć zamówienia."] } }] }
+      });
+    }
+
+    // 6) Zapis pozycji zamówienia
+    const { error: oiErr } = await supabase
+      .from("order_items")
+      .insert({
+        order_id: order.id,
+        menu_item_id: item.id,
+        name: item.name,
+        unit_price_cents,
+        qty
+      });
+
+    if (oiErr) {
+      return res.json({
+        fulfillment_response: { messages: [{ text: { text: ["Nie udało się dodać pozycji do zamówienia."] } }] }
+      });
+    }
+
+    // 7) Odpowiedź do CX
+    return res.json({
+      sessionInfo: {
+        parameters: {
+          order_id: order.id,
+          eta: order.eta,
+          price_total: (order.total_cents / 100).toFixed(2) + " zł",
+          items_summary: `${qty}× ${item.name}`
+        }
+      },
+      fulfillment_response: {
+        messages: [
+          { text: { text: [`Zamówienie przyjęte. ${qty}× ${item.name}. Dostawa ${order.eta}.`] } }
+        ]
+      }
+    });
+  } catch (e) {
+    console.error("createOrder error:", e);
+    return res.json({
+      fulfillment_response: { messages: [{ text: { text: ["Wystąpił błąd po stronie serwera przy tworzeniu zamówienia."] } }] }
+    });
+  }
 }
 
 // Helper function to get menu for a restaurant
@@ -336,15 +408,15 @@ async function getMenu(req, res) {
         custom_payload: {
           menu_items: fallbackMenu
         },
-        session_info: {
-          parameters: {
-            // Dodaj mapę nazwa→ID pozycji menu dla create_order
-            items_map: fallbackMenu.reduce((map, item) => {
-              map[item.name] = item.id;
-              return map;
-            }, {})
-          }
+      sessionInfo: {
+        parameters: {
+          // Dodaj mapę nazwa→ID pozycji menu dla create_order
+          items_map: fallbackMenu.reduce((map, item) => {
+            map[item.name] = item.id;
+            return map;
+          }, {})
         }
+      }
       });
     }
 
@@ -359,7 +431,7 @@ async function getMenu(req, res) {
       custom_payload: {
         menu_items: menuItems
       },
-      session_info: {
+      sessionInfo: {
         parameters: {
           // Dodaj mapę nazwa→ID pozycji menu dla create_order
           items_map: menuItems.reduce((map, item) => {
