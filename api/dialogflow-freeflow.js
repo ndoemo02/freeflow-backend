@@ -66,7 +66,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           sessionInfo: {
             parameters: {
               last_restaurant_list: restaurants.map(r => r.name),
-              restaurant_name_to_id: JSON.stringify(nameToId).replace(/"/g, '\\"'), // 👈 podwójnie escapowany JSON
+              restaurant_name_to_id: JSON.stringify(nameToId).replace(/\\/g, '\\\\').replace(/"/g, '\\"'), // 👈 podwójne escapowanie
               last_update_ts: Date.now() // tylko po to, żeby odświeżał sesję
             },
           },
@@ -78,19 +78,28 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
-        let { restaurant_name, restaurant_name_to_id } = params || {};
+        let { restaurant_name } = params || {};
 
-        if (restaurant_name_to_id && typeof restaurant_name_to_id === 'string') {
-          try {
-            restaurant_name_to_id = JSON.parse(
-              restaurant_name_to_id
-                .replace(/^"|"$/g, '')      // usuń zewnętrzne cudzysłowy
-                .replace(/\\"/g, '"')       // zamień \" → "
-            );
-          } catch (err) {
-            console.error("Błąd parsowania mapy restauracji:", err, restaurant_name_to_id);
-            restaurant_name_to_id = {};
+        let mapRaw = params?.restaurant_name_to_id;
+        let restaurant_name_to_id = {};
+
+        try {
+          if (typeof mapRaw === 'object') {
+            restaurant_name_to_id = mapRaw; // CX czasem jednak oddaje obiekt, nie string
+          } else if (typeof mapRaw === 'string') {
+            // usuń zewnętrzne cudzysłowy, unescape
+            const cleaned = mapRaw
+              .trim()
+              .replace(/^"+|"+$/g, '')     // usuń podwójne zewnętrzne
+              .replace(/\\"/g, '"')        // zamień \" -> "
+              .replace(/\\n/g, '')         // usuń ewentualne \n
+              .replace(/\\\\/g, '\\');     // podwójne backslash -> jeden
+
+            restaurant_name_to_id = JSON.parse(cleaned);
           }
+        } catch (err) {
+          console.error("🔥 Błąd parsowania mapy restauracji:", err.message, "\nDane:", mapRaw);
+          restaurant_name_to_id = {};
         }
 
         if (!restaurant_name_to_id || !restaurant_name) {
