@@ -126,180 +126,76 @@ async function listMenu(req, res) {
 
 async function createOrder(req, res) {
   try {
-    // Patch defensywny - akceptuj różne nazwy pól
-    const P = req.body?.sessionInfo?.parameters
-           || req.body?.session_info?.parameters
-           || {};
+    console.log("📦 [createOrder] Params:", JSON.stringify(req.body?.sessionInfo?.parameters, null, 2));
 
-    const qty = Math.max(1, Number(P.qty || 1));
-
-    // 0) Sanity check env (bez logowania wartości!)
-    const hasServiceRole = !!(process.env.SUPABASE_SERVICE_ROLE && process.env.SUPABASE_SERVICE_ROLE.length > 20);
-    if (!hasServiceRole) {
-      console.error("createOrder: brak poprawnego SUPABASE_SERVICE_ROLE w env (Vercel).");
-    }
-
-    // Debug: loguj parametry sesji
-    console.log("createOrder params snapshot:", JSON.stringify(req.body?.sessionInfo?.parameters, null, 2));
-
-    // 1) Ustal parametry z różnych możliwych nazw pól
-    const restaurant_id =
-      P.restaurant_id || P.RestaurantId || P.restaurantId || P.restaurant ||
-      (P.restaurant_name_to_id && P.RestaurantName && P.restaurant_name_to_id[P.RestaurantName]);
-
-    let item_name =
-      P.item_name || P.item || P.dish || P.menu_item || P.name;
-
-    let menu_item_id =
-      (typeof P.menu_item_id === "string" ? P.menu_item_id : null) ||
-      (P.items_map && item_name && P.items_map[item_name]) || null;
-
-    // sanity: usuń nadmiarowe cudzysłowy i spacje
-    if (typeof menu_item_id === "string") {
-      menu_item_id = menu_item_id.trim().replace(/^"+|"+$/g, "");
-    }
-
-    if (!menu_item_id && !item_name) {
-      return res.json({
-        fulfillment_response: {
-          messages: [{ text: { text: ["Nie mam kompletnej pozycji menu (brak nazwy i ID)."] } }]
-        }
-      });
-    }
+    const params = req.body?.sessionInfo?.parameters || {};
+    const { restaurant_id, item_name, menu_item_id } = params;
 
     if (!restaurant_id) {
-      return res.json({
-        fulfillment_response: {
-          messages: [{ text: { text: ["Brakuje restaurant_id do złożenia zamówienia."] } }]
-        }
-      });
+      throw new Error("Brak restaurant_id w sesji!");
     }
 
-    // 3) Pobierz pozycję menu (service role; fallback po nazwie)
-    let item = null;
+    let itemId = menu_item_id;
 
-    if (menu_item_id) {
-      const { data, error } = await supabase
-        .from("menu_items")
-        .select("id,name,price_cents,price,restaurant_id")
-        .eq("id", menu_item_id)
-        .single();
-
-      if (error) {
-        console.warn("createOrder: select by id error:", error?.message || error);
-      } else {
-        item = data || null;
-      }
+    if (!itemId && item_name && params.items_map) {
+      itemId = params.items_map[item_name];
     }
 
-    if (!item && item_name) {
-      // Fallback: szukaj po nazwie + restauracji (case-insensitive)
-      const { data, error } = await supabase
-        .from("menu_items")
-        .select("id,name,price_cents,price,restaurant_id")
-        .eq("restaurant_id", restaurant_id)
-        .ilike("name", String(item_name).trim())   // dokładny ilike
-        .maybeSingle();
-
-      if (error) {
-        console.warn("createOrder: select by name (exact ilike) error:", error?.message || error);
-      }
-      if (!data) {
-        // Drugi fallback: ilike z wildcardami
-        const { data: data2, error: err2 } = await supabase
-          .from("menu_items")
-          .select("id,name,price_cents,price,restaurant_id")
-          .eq("restaurant_id", restaurant_id)
-          .ilike("name", `%${String(item_name).trim()}%`)
-          .order("name")
-          .limit(1);
-        if (err2) {
-          console.warn("createOrder: select by name (wildcard) error:", err2?.message || err2);
-        } else if (data2 && data2.length) {
-          item = data2[0];
-        }
-      } else {
-        item = data;
-      }
+    if (!itemId) {
+      throw new Error(`Nie znaleziono ID pozycji menu dla: ${item_name}`);
     }
 
-    if (!item) {
-      return res.json({
-        fulfillment_response: {
-          messages: [{ text: { text: ["Nie znalazłem pozycji menu o podanym ID/nazwie."] } }]
-        }
-      });
-    }
+    console.log(`🔍 Szukam pozycji menu: ${item_name} (${itemId})`);
 
-    // 4) Normalizacja ceny do groszy
-    const unit_price_cents = (item.price_cents != null)
-      ? Number(item.price_cents)
-      : Math.round(Number(item.price) * 100);
+    const { data: menuItem, error: menuErr } = await supabase
+      .from('menu_items')
+      .select('id, name, price, restaurant_id')
+      .eq('id', itemId)
+      .maybeSingle();
 
-    if (!Number.isFinite(unit_price_cents)) {
-      console.error("createOrder: unit_price_cents invalid", { price_cents: item.price_cents, price: item.price });
-      return res.json({
-        fulfillment_response: { messages: [{ text: { text: ["Pozycja menu ma nieprawidłową cenę."] } }] }
-      });
-    }
+    if (menuErr) throw new Error(`Błąd zapytania Supabase: ${menuErr.message}`);
+    if (!menuItem) throw new Error(`Nie znaleziono pozycji menu o ID ${itemId}`);
 
-    // 5) Zamówienie
-    const subtotal_cents = unit_price_cents * qty;
+    console.log(`✅ Znaleziono: ${menuItem.name} - ${menuItem.price} zł`);
 
-    const { data: order, error: orderErr } = await supabase
-      .from("orders")
-      .insert({
-        restaurant_id,
-        subtotal_cents,
-        total_cents: subtotal_cents,
-        status: "new",
-        eta: "15–20 min"
-      })
-      .select("id,eta,total_cents")
+    const order = {
+      restaurant_id: restaurant_id,
+      total_price: menuItem.price,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+
+    const { data: insertedOrder, error: orderErr } = await supabase
+      .from('orders')
+      .insert(order)
+      .select()
       .single();
 
-    if (orderErr || !order) {
-      console.error("createOrder: insert order error:", orderErr?.message || orderErr);
-      return res.json({
-        fulfillment_response: { messages: [{ text: { text: ["Nie udało się utworzyć zamówienia."] } }] }
-      });
-    }
+    if (orderErr) throw new Error(`Nie udało się utworzyć zamówienia: ${orderErr.message}`);
 
-    const { error: oiErr } = await supabase
-      .from("order_items")
+    await supabase
+      .from('order_items')
       .insert({
-        order_id: order.id,
-        menu_item_id: item.id,
-        name: item.name,
-        unit_price_cents,
-        qty
+        order_id: insertedOrder.id,
+        menu_item_id: menuItem.id,
+        quantity: 1,
+        price: menuItem.price,
       });
 
-    if (oiErr) {
-      console.error("createOrder: insert order_items error:", oiErr?.message || oiErr);
-      return res.json({
-        fulfillment_response: { messages: [{ text: { text: ["Nie udało się dodać pozycji do zamówienia."] } }] }
-      });
-    }
+    console.log("🧾 Zamówienie utworzone:", insertedOrder.id);
 
     return res.json({
-      sessionInfo: {
-        parameters: {
-          order_id: order.id,
-          eta: order.eta,
-          price_total: (order.total_cents / 100).toFixed(2) + " zł",
-          items_summary: `${qty}× ${item.name}`
-        }
-      },
       fulfillment_response: {
-        messages: [{ text: { text: [`Zamówienie przyjęte. ${qty}× ${item.name}. Dostawa ${order.eta}.`] } }]
-      }
+        messages: [
+          { text: { text: [`Zamówienie przyjęte: ${menuItem.name} (${menuItem.price} zł)`] } },
+        ],
+      },
     });
 
   } catch (e) {
-    console.error("createOrder fatal:", e);
+    console.error("createOrder error:", e);
     return res.json({
-      fulfillment_response: { messages: [{ text: { text: ["Wystąpił błąd po stronie serwera przy tworzeniu zamówienia."] } }] }
+      fulfillment_response: { messages: [{ text: { text: [e.message || "Wystąpił błąd po stronie serwera przy tworzeniu zamówienia."] } }] }
     });
   }
 }
@@ -523,6 +419,31 @@ async function diagMenuProbe(req, res) {
   } catch (e) {
     console.error("diagMenuProbe error:", e);
     return res.json({ ok: false, error: e.message, item: null });
+  }
+}
+
+// --- DIAGNOSTIC ENDPOINT ---
+export async function testSupabase(req, res) {
+  console.log("🧪 [TEST] Checking Supabase connectivity...");
+  try {
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('id, name, price')
+      .limit(1);
+
+    if (error) throw error;
+    return res.status(200).json({
+      ok: true,
+      message: "✅ Supabase connection works!",
+      sample: data,
+    });
+  } catch (err) {
+    console.error("❌ [TEST] Supabase error:", err.message);
+    return res.status(500).json({
+      ok: false,
+      message: "❌ Supabase connection failed",
+      error: err.message,
+    });
   }
 }
 
