@@ -159,6 +159,27 @@ async function createOrder(req, res) {
   });
 }
 
+// Helper function to get menu for a restaurant
+async function getMenuForRestaurant(restaurantId) {
+  const { data: menuItems, error } = await supabase
+    .from('menu_items')
+    .select('*')
+    .eq('restaurant_id', restaurantId);
+
+  if (error || !menuItems || menuItems.length === 0) {
+    // Fallback menu data
+    return [
+      { id: '1', name: 'Pizza Margherita', price_cents: 2599, category: 'Pizza', restaurant_id: restaurantId },
+      { id: '2', name: 'Pizza Pepperoni', price_cents: 2899, category: 'Pizza', restaurant_id: restaurantId },
+      { id: '3', name: 'Spaghetti Carbonara', price_cents: 2299, category: 'Pasta', restaurant_id: restaurantId },
+      { id: '4', name: 'Schabowy z ziemniakami', price_cents: 1899, category: 'Dania główne', restaurant_id: restaurantId },
+      { id: '5', name: 'Zupa pomidorowa', price_cents: 899, category: 'Zupy', restaurant_id: restaurantId }
+    ];
+  }
+
+  return menuItems;
+}
+
 async function getMenu(req, res) {
   try {
     // Debug: sprawdź wszystkie parametry sesji
@@ -172,6 +193,34 @@ async function getMenu(req, res) {
     // 2. Sprawdź czy ID restauracji zostało znalezione
     if (!restaurantId) {
       console.log('❌ No RestaurantName found in parameters');
+      
+      // Fallback: spróbuj znaleźć restaurację po nazwie w tekście użytkownika
+      const userText = req.body?.queryResult?.queryText || '';
+      console.log('🔍 User text for fallback search:', userText);
+      
+      if (userText.toLowerCase().includes('callzone')) {
+        // Znajdź ID restauracji Callzone w bazie
+        const { data: callzoneRestaurant } = await supabase
+          .from('restaurants')
+          .select('id')
+          .ilike('name', '%callzone%')
+          .single();
+          
+        if (callzoneRestaurant) {
+          console.log('✅ Found Callzone restaurant by name:', callzoneRestaurant.id);
+          // Użyj znalezionego ID
+          const menuItems = await getMenuForRestaurant(callzoneRestaurant.id);
+          return res.json({
+            fulfillment_response: {
+              messages: [{ text: { text: ["Świetny wybór! Oto menu Callzone. Co podać?"] } }]
+            },
+            custom_payload: {
+              menu_items: menuItems
+            }
+          });
+        }
+      }
+      
       return res.json({
         fulfillment_response: { 
           messages: [{ text: { text: ["Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie."] } }] 
