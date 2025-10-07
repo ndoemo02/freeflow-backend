@@ -127,16 +127,24 @@ async function createOrder(req, res) {
   const p = req.body?.sessionInfo?.parameters || {};
   const qty = Number(p.qty || 1);
 
+  console.log('🛒 createOrder parameters:', p);
+  console.log('🛒 item_name:', p.item_name);
+  console.log('🛒 items_map:', p.items_map);
+
   // priorytet: nazwa → id z items_map → fallback na bezpośredni menu_item_id
   let menu_item_id = p.menu_item_id;
   if (!menu_item_id && p.item_name && p.items_map?.[p.item_name]) {
     menu_item_id = p.items_map[p.item_name];
+    console.log('🛒 Found menu_item_id from items_map:', menu_item_id);
   }
 
-  const { data: item } = await supabase.from("menu_items")
+  const { data: item, error } = await supabase.from("menu_items")
     .select("id,name,price_cents").eq("id", menu_item_id).single();
 
+  console.log('🛒 Supabase query result:', { item, error, menu_item_id });
+
   if (!item) {
+    console.log('❌ No item found for menu_item_id:', menu_item_id);
     return res.json({ fulfillment_response: { messages: [{ text: { text: ["Nie mam kompletnej pozycji menu."] } }] } });
   }
 
