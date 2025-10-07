@@ -144,9 +144,8 @@ async function createOrder(req, res) {
       });
     }
 
-    // 2) Pobierz pozycję menu – użyj roli, która ma dostęp do odczytu (anon OK),
-    //    ale jeżeli masz RLS, w razie problemu przełącz na `supabase` (service role)
-    const { data: item, error: itemErr } = await supabaseAnon
+    // 2) Pobierz pozycję menu – użyj service role dla lepszych uprawnień
+    const { data: item, error: itemErr } = await supabase
       .from("menu_items")
       .select("id,name,price_cents,price,restaurant_id")
       .eq("id", menu_item_id)
