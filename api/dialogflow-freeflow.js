@@ -111,7 +111,13 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         return res.json({
           sessionInfo: {
-            parameters: { restaurant_id: restaurantId }
+            parameters: {
+              restaurant_id: restaurantId,
+              restaurant_name: name,
+              last_restaurant_list: params.last_restaurant_list,
+              restaurant_name_to_id: params.restaurant_name_to_id,
+              last_update_ts: Date.now() // odśwież sesję
+            }
           },
           fulfillment_response: {
             messages: [
