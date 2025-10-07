@@ -118,7 +118,9 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         return res.json({
           sessionInfo: {
-            parameters: { restaurant_id: restaurantId }
+            parameters: { 
+              restaurant_id: restaurantId.replace(/["\\]/g, '') // 👈 czysty UUID bez artefaktów
+            }
           },
           fulfillment_response: {
             messages: [
