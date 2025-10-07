@@ -67,6 +67,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
             parameters: {
               last_restaurant_list: restaurants,
               restaurant_name_to_id: nameToId,
+              last_update_ts: Date.now() // tylko po to, żeby odświeżał sesję
             },
           },
           sessionEntityTypes: sessionEntities,
