@@ -447,4 +447,3 @@ export async function testSupabase(req, res) {
   }
 }
 
-export default handler;
