@@ -79,7 +79,11 @@ async function listRestaurants(req, res) {
         restaurant_name_to_id: restaurantList.reduce((map, r) => {
           map[r.name] = r.id;
           return map;
-        }, {})
+        }, {}),
+        last_restaurant_list: Object.keys(restaurantList.reduce((map, r) => {
+          map[r.name] = r.id;
+          return map;
+        }, {}))
       },
       sessionEntityTypes: [{
         name: entityTypeId,
@@ -222,48 +226,36 @@ async function getMenuForRestaurant(restaurantId) {
 }
 
 async function selectRestaurant(req, res) {
-  try {
-    console.log('🎯 SELECT_RESTAURANT HIT!');
-    
-    const selectedName = req.body?.sessionInfo?.parameters?.RestaurantName;
-    console.log('🍽️ Selected restaurant name:', selectedName);
-    
-    // Pobierz mapę nazwa→ID z parametrów sesji (zapisana przez recommend_nearby)
-    const nameToIdMap = req.body?.sessionInfo?.parameters?.restaurant_name_to_id || {};
-    console.log('🗺️ Name to ID map:', nameToIdMap);
-    
-    const restaurant_id = nameToIdMap[selectedName];
-    
-    if (!restaurant_id) {
-      console.log('❌ Restaurant not found in map:', selectedName);
-      return res.json({
-        fulfillment_response: {
-          messages: [{ text: { text: ["Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie."] } }]
-        }
-      });
-    }
+  const p = req.body?.sessionInfo?.parameters || {};
+  const name = p.RestaurantName?.trim();
+  const id =
+    p.restaurant_name_to_id?.[name] ||
+    Object.entries(p.restaurant_name_to_id || {}).find(([k]) =>
+      k.toLowerCase().includes(name?.toLowerCase())
+    )?.[1];
 
-    console.log('✅ Found restaurant ID:', restaurant_id);
-
-    return res.json({
-      sessionInfo: {
-        parameters: {
-          restaurant_id: restaurant_id
-        }
-      },
+  if (!id) {
+    return res.status(200).json({
       fulfillment_response: {
-        messages: [{ text: { text: [`Wybrano: ${selectedName}`] } }]
-      }
-    });
-
-  } catch (error) {
-    console.error('❌ selectRestaurant error:', error);
-    return res.json({
-      fulfillment_response: { 
-        messages: [{ text: { text: ["Wystąpił błąd podczas wyboru restauracji."] } }] 
-      }
+        messages: [
+          {
+            text: {
+              text: [
+                `Nie udało się zidentyfikować restauracji "${name}". Spróbuj ponownie.`,
+              ],
+            },
+          },
+        ],
+      },
     });
   }
+
+  return res.status(200).json({
+    fulfillment_response: {
+      messages: [{ text: { text: [`Wybrano: ${name}`] } }],
+    },
+    sessionInfo: { parameters: { restaurant_id: id } },
+  });
 }
 
 async function getMenu(req, res) {
