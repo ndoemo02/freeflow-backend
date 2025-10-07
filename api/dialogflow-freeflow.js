@@ -84,7 +84,7 @@ async function listRestaurants(req, res) {
         name: entityTypeId,
         entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
         entities: restaurantList.map(r => ({
-          value: r.id,
+          value: r.name,    // ✅ Używamy nazwy restauracji jako wartości
           synonyms: [r.name]
         }))
       }]
