@@ -88,18 +88,19 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         console.log('🍽 Wybrana restauracja =', restaurantName);
 
         const restaurantMap = {
-          'Callzone': 'bd9f2244-7618-4071-aa96-52616a7b4c70',
-          'Bar Praha': '8b00b05e-72f7-4a5f-b50c-5630a75d6312',
-          'Tasty King Kebab': 'fc844513-2869-4f42-b04f-c21e1e4cceb7',
-          'Restauracja Stara Kamienica': '1fc1e782-bac6-47b2-978a-f6f2b38000cd',
-          'Dwór Hubertus': 'af8448ef-974b-46c8-a4ae-b04b8dc7c9f8',
-          'Restauracja Rezydencja': '4d27fbe3-20d0-4eb4-b003-1935be53af25',
-          'Vien-Thien': '70842598-1632-43f6-8015-706d5adf182f',
-          'Pizzeria Monte Carlo': '83566974-1017-4408-90ee-2571cc069878',
-          'Burger House': '569a7d29-57be-4224-bdf3-09c483415cea'
+          'callzone': 'bd9f2244-7618-4071-aa96-52616a7b4c70',
+          'bar praha': '8b00b05e-72f7-4a5f-b50c-5630a75d6312',
+          'tasty king kebab': 'fc844513-2869-4f42-b04f-c21e1e4cceb7',
+          'restauracja stara kamienica': '1fc1e782-bac6-47b2-978a-f6f2b38000cd',
+          'dwór hubertus': 'af8448ef-974b-46c8-a4ae-b04b8dc7c9f8',
+          'restauracja rezydencja': '4d27fbe3-20d0-4eb4-b003-1935be53af25',
+          'vien-thien': '70842598-1632-43f6-8015-706d5adf182f',
+          'pizzeria monte carlo': '83566974-1017-4408-90ee-2571cc069878',
+          'burger house': '569a7d29-57be-4224-bdf3-09c483415cea'
         };
 
-        const restaurantId = restaurantMap[restaurantName];
+        // znajdź ID po nazwie (case-insensitive)
+        const restaurantId = restaurantMap[restaurantName?.toLowerCase()];
 
         if (!restaurantId) {
           console.log('⚠️ Brak ID w mapie dla:', restaurantName);
