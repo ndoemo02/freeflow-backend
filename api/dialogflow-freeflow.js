@@ -327,6 +327,15 @@ async function getMenu(req, res) {
         },
         custom_payload: {
           menu_items: fallbackMenu
+        },
+        session_info: {
+          parameters: {
+            // Dodaj mapę nazwa→ID pozycji menu dla create_order
+            items_map: fallbackMenu.reduce((map, item) => {
+              map[item.name] = item.id;
+              return map;
+            }, {})
+          }
         }
       });
     }
@@ -341,6 +350,15 @@ async function getMenu(req, res) {
       },
       custom_payload: {
         menu_items: menuItems
+      },
+      session_info: {
+        parameters: {
+          // Dodaj mapę nazwa→ID pozycji menu dla create_order
+          items_map: menuItems.reduce((map, item) => {
+            map[item.name] = item.id;
+            return map;
+          }, {})
+        }
       }
     });
 
