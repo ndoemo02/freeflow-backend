@@ -14,6 +14,8 @@ const supabase = createClient(
 // --- główny router ---
 app.post("/api/dialogflow-freeflow", async (req, res) => {
   try {
+    console.log('💡 BODY =', JSON.stringify(req.body, null, 2));
+    
     const tag = req.body.fulfillmentInfo?.tag;
     const session = req.body.sessionInfo?.session;
     const params = req.body.sessionInfo?.parameters || {};
