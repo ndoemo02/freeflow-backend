@@ -62,6 +62,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         return res.json({
           fulfillment_response: { messages: [{ text: { text: [listMsg] } }] },
+          custom_payload: { restaurants },
           sessionInfo: {
             parameters: {
               last_restaurant_list: restaurants,
