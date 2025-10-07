@@ -17,6 +17,60 @@ module.exports = async (req, res) => {
     const tag = body?.fulfillmentInfo?.tag || '';
     const p   = body?.sessionInfo?.parameters || {};
 
+    if (tag === 'recommend_nearby') {
+      console.log('🎯 RECOMMEND_NEARBY HIT!');
+      
+      // Pobierz listę restauracji z Supabase
+      const { data: restaurants, error } = await supabase
+        .from('restaurants')
+        .select('id, name, address, city, cuisine_type')
+        .limit(10);
+      
+      if (error) {
+        console.error('❌ Supabase error:', error);
+        return res.status(200).json({
+          fulfillment_response: { 
+            messages: [{ text: { text: ["Wystąpił błąd podczas pobierania restauracji."] } }] 
+          }
+        });
+      }
+
+      const restaurantList = restaurants || [];
+      const formattedList = restaurantList.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join('\n');
+      
+      // Pełna ścieżka do encji @RestaurantName
+      const entityTypeId = "projects/primal-index-311413/locations/europe-west1/agents/2b40816b-cb06-43f7-b36e-712fcad6c0eb/entityTypes/516effbe-cd1c-4ac2-ba94-657f88ddf08a";
+
+      return res.status(200).json({
+        // a. fulfillment_response - wiadomość tekstowa dla użytkownika
+        fulfillment_response: {
+          messages: [{ text: { text: [`Znalazłem te restauracje w okolicy:\n${formattedList}`] } }]
+        },
+        // b. custom_payload - tablica obiektów restauracji dla frontendu
+        custom_payload: {
+          restaurants: restaurantList
+        },
+        // c. session_info.session_entity_types - dynamiczna aktualizacja encji
+        session_info: {
+          parameters: {
+            restaurant_options: restaurantList,
+            options_map: restaurantList.reduce((map, r, i) => {
+              map[String(i+1)] = { restaurant_id: r.id };
+              return map;
+            }, {})
+          },
+          session_entity_types: [{
+            name: entityTypeId,
+            entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
+            entities: restaurantList.map(r => ({
+              value: r.id,
+              synonyms: [r.name]
+            }))
+          }]
+        }
+      });
+    }
+
     if (tag === 'PLACES_RECS') {
       const dishType = String(p.dish_type ?? '');
       const radiusKm = Number(p.radius_km ?? 10);
