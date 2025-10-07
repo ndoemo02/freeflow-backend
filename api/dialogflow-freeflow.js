@@ -17,6 +17,7 @@ export default async function handler(req, res) {
     }
     if (tag === "list_restaurants") return await listRestaurants(req, res);
     if (tag === "list_menu") return await listMenu(req, res);
+    if (tag === "get_menu") return await getMenu(req, res);
     if (tag === "create_order") return await createOrder(req, res);
     console.log('❌ UNKNOWN TAG:', tag);
     return res.json({ fulfillment_response: { messages: [{ text: { text: ["Brak obsługi tagu."] } }] } });
@@ -140,4 +141,65 @@ async function createOrder(req, res) {
       messages: [{ text: { text: [`Zamówienie przyjęte. ${qty}× ${item.name}. Dostawa ${order.eta}.`] } }]
     }
   });
+}
+
+async function getMenu(req, res) {
+  try {
+    // Pobierz restaurant_id z parametrów sesji
+    const restaurant_id = req.body?.sessionInfo?.parameters?.restaurant_id;
+    
+    if (!restaurant_id) {
+      return res.json({
+        fulfillment_response: { 
+          messages: [{ text: { text: ["Nie mogę znaleźć ID restauracji. Spróbuj ponownie."] } }] 
+        }
+      });
+    }
+
+    console.log('🍽️ Getting menu for restaurant_id:', restaurant_id);
+
+    // Wykonaj zapytanie do tabeli menu_items w Supabase
+    const { data: menuItems, error } = await supabaseAnon
+      .from('menu_items')
+      .select('*')
+      .eq('restaurant_id', restaurant_id);
+
+    if (error) {
+      console.error('❌ Supabase error:', error);
+      return res.json({
+        fulfillment_response: { 
+          messages: [{ text: { text: ["Wystąpił błąd podczas pobierania menu."] } }] 
+        }
+      });
+    }
+
+    if (!menuItems || menuItems.length === 0) {
+      return res.json({
+        fulfillment_response: { 
+          messages: [{ text: { text: ["Nie znalazłem menu dla tej restauracji."] } }] 
+        }
+      });
+    }
+
+    // Stwórz odpowiedź tekstową dla użytkownika
+    const responseText = "Świetny wybór! Oto menu. Co podać?";
+
+    // Stwórz odpowiedź JSON dla Dialogflow
+    return res.json({
+      fulfillment_response: {
+        messages: [{ text: { text: [responseText] } }]
+      },
+      custom_payload: {
+        menu_items: menuItems
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ getMenu error:', error);
+    return res.json({
+      fulfillment_response: { 
+        messages: [{ text: { text: ["Wystąpił błąd podczas pobierania menu."] } }] 
+      }
+    });
+  }
 }
