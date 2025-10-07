@@ -133,7 +133,7 @@ async function createOrder(req, res) {
     menu_item_id = p.items_map[p.item_name];
   }
 
-  const { data: item } = await supabaseAnon.from("menu_items")
+  const { data: item } = await supabase.from("menu_items")
     .select("id,name,price_cents").eq("id", menu_item_id).single();
 
   if (!item) {
