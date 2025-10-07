@@ -66,7 +66,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           sessionInfo: {
             parameters: {
               last_restaurant_list: restaurants.map(r => r.name),
-              restaurant_name_to_id: JSON.stringify(nameToId), // 👈 zapisz jako string
+              restaurant_name_to_id: JSON.stringify(nameToId).replace(/"/g, '\\"'), // 👈 podwójnie escapowany JSON
               last_update_ts: Date.now() // tylko po to, żeby odświeżał sesję
             },
           },
@@ -82,9 +82,14 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         if (restaurant_name_to_id && typeof restaurant_name_to_id === 'string') {
           try {
-            restaurant_name_to_id = JSON.parse(restaurant_name_to_id);
+            restaurant_name_to_id = JSON.parse(
+              restaurant_name_to_id
+                .replace(/^"|"$/g, '')      // usuń zewnętrzne cudzysłowy
+                .replace(/\\"/g, '"')       // zamień \" → "
+            );
           } catch (err) {
-            console.error("Błąd parsowania mapy restauracji:", err);
+            console.error("Błąd parsowania mapy restauracji:", err, restaurant_name_to_id);
+            restaurant_name_to_id = {};
           }
         }
 
