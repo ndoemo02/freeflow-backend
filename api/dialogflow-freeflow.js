@@ -8,7 +8,10 @@ export default async function handler(req, res) {
   const { fulfillmentInfo, sessionInfo } = req.body || {};
   const tag = fulfillmentInfo?.tag;
   
-  console.log('🚀 WEBHOOK HIT - tag:', tag, 'body:', JSON.stringify(req.body, null, 2));
+  console.log('🚀 WEBHOOK HIT - tag:', tag);
+  console.log('📋 Full request body:', JSON.stringify(req.body, null, 2));
+  console.log('🔍 SessionInfo:', JSON.stringify(sessionInfo, null, 2));
+  console.log('🏷️ FulfillmentInfo:', JSON.stringify(fulfillmentInfo, null, 2));
 
   try {
     if (tag === "recommend_nearby") {
