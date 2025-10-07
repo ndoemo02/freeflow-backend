@@ -158,24 +158,25 @@ async function createOrder(req, res) {
 
 async function getMenu(req, res) {
   try {
-    // Pobierz restaurant_id z parametrów sesji
-    const restaurant_id = req.body?.sessionInfo?.parameters?.restaurant_id;
+    // 1. Pobierz restaurant_id z parametrów sesji
+    const restaurantId = req.body?.sessionInfo?.parameters?.restaurant_id;
     
-    if (!restaurant_id) {
+    // 2. Sprawdź czy ID restauracji zostało znalezione
+    if (!restaurantId) {
       return res.json({
         fulfillment_response: { 
-          messages: [{ text: { text: ["Nie mogę znaleźć ID restauracji. Spróbuj ponownie."] } }] 
+          messages: [{ text: { text: ["Nie udało się zidentyfikować wybranej restauracji. Spróbuj ponownie."] } }] 
         }
       });
     }
 
-    console.log('🍽️ Getting menu for restaurant_id:', restaurant_id);
+    console.log('🍽️ Getting menu for restaurant_id:', restaurantId);
 
-    // Wykonaj zapytanie do tabeli menu_items w Supabase
+    // 3. Wykonaj zapytanie do tabeli menu_items w Supabase
     const { data: menuItems, error } = await supabase
       .from('menu_items')
       .select('*')
-      .eq('restaurant_id', restaurant_id);
+      .eq('restaurant_id', restaurantId);
 
     if (error) {
       console.error('❌ Supabase error:', error);
@@ -190,11 +191,11 @@ async function getMenu(req, res) {
       console.log('⚠️ No menu items found, using fallback data');
       // Fallback menu data
       const fallbackMenu = [
-        { id: '1', name: 'Pizza Margherita', price_cents: 2599, category: 'Pizza', business_id: restaurant_id },
-        { id: '2', name: 'Pizza Pepperoni', price_cents: 2899, category: 'Pizza', business_id: restaurant_id },
-        { id: '3', name: 'Spaghetti Carbonara', price_cents: 2299, category: 'Pasta', business_id: restaurant_id },
-        { id: '4', name: 'Schabowy z ziemniakami', price_cents: 1899, category: 'Dania główne', business_id: restaurant_id },
-        { id: '5', name: 'Zupa pomidorowa', price_cents: 899, category: 'Zupy', business_id: restaurant_id }
+        { id: '1', name: 'Pizza Margherita', price_cents: 2599, category: 'Pizza', restaurant_id: restaurantId },
+        { id: '2', name: 'Pizza Pepperoni', price_cents: 2899, category: 'Pizza', restaurant_id: restaurantId },
+        { id: '3', name: 'Spaghetti Carbonara', price_cents: 2299, category: 'Pasta', restaurant_id: restaurantId },
+        { id: '4', name: 'Schabowy z ziemniakami', price_cents: 1899, category: 'Dania główne', restaurant_id: restaurantId },
+        { id: '5', name: 'Zupa pomidorowa', price_cents: 899, category: 'Zupy', restaurant_id: restaurantId }
       ];
       
       return res.json({
