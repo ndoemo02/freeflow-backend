@@ -32,38 +32,51 @@ export default async function handler(req, res) {
 async function listRestaurants(req, res) {
   const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
   
-  // Użyj service role key dla lepszych uprawnień
-  const { data, error } = await supabase.from("restaurants").select("id,name,address").limit(10);
+  // Pobierz listę restauracji z Supabase
+  const { data: restaurants, error } = await supabase
+    .from("restaurants")
+    .select("id, name, address, city, cuisine_type")
+    .limit(10);
   
-  const restaurants = data || [];
-  const formattedList = restaurants.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
+  if (error) {
+    console.error('❌ Supabase error:', error);
+    return res.json({
+      fulfillment_response: { 
+        messages: [{ text: { text: ["Wystąpił błąd podczas pobierania restauracji."] } }] 
+      }
+    });
+  }
 
-  // mapka numer→id do późniejszego wyboru
-  const options_map = {};
-  restaurants.forEach((r, i) => options_map[String(i+1)] = { restaurant_id: r.id });
-
-  const responseText = `Jasne, znalazłem te miejsca: ${formattedList}`;
-
-  // Pełna ścieżka do Twojej encji @RestaurantName
+  const restaurantList = restaurants || [];
+  const formattedList = restaurantList.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
+  
+  // Pełna ścieżka do encji @RestaurantName
   const entityTypeId = "projects/primal-index-311413/locations/europe-west1/agents/2b40816b-cb06-43f7-b36e-712fcad6c0eb/entityTypes/516effbe-cd1c-4ac2-ba94-657f88ddf08a";
 
   return res.json({
-    // Odpowiedź tekstowa
+    // a. fulfillment_response - wiadomość tekstowa dla użytkownika
     fulfillment_response: {
-      messages: [{ text: { text: [responseText] } }]
+      messages: [{ text: { text: [`Znalazłem te restauracje w okolicy:\n${formattedList}`] } }]
     },
-    // Zapisanie danych w pamięci i DYNAMICZNA AKTUALIZACJA ENCJI
+    // b. custom_payload - tablica obiektów restauracji dla frontendu
+    custom_payload: {
+      restaurants: restaurantList
+    },
+    // c. session_info.session_entity_types - dynamiczna aktualizacja encji
     session_info: {
       parameters: {
-        restaurant_options: restaurants, // Zapisujemy całą listę, tak jak wcześniej
-        options_map // Zachowujemy mapkę numer→id
+        restaurant_options: restaurantList,
+        options_map: restaurantList.reduce((map, r, i) => {
+          map[String(i+1)] = { restaurant_id: r.id };
+          return map;
+        }, {})
       },
       session_entity_types: [{
         name: entityTypeId,
         entity_override_mode: "ENTITY_OVERRIDE_MODE_OVERRIDE",
-        entities: restaurants.map(r => ({
-          value: r.id,      // Używamy ID restauracji jako unikalnej wartości
-          synonyms: [r.name] // Nazwa restauracji jako synonim
+        entities: restaurantList.map(r => ({
+          value: r.id,
+          synonyms: [r.name]
         }))
       }]
     }
