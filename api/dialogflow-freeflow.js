@@ -162,7 +162,7 @@ async function getMenu(req, res) {
     const { data: menuItems, error } = await supabaseAnon
       .from('menu_items')
       .select('*')
-      .eq('restaurant_id', restaurant_id);
+      .eq('business_id', restaurant_id);
 
     if (error) {
       console.error('❌ Supabase error:', error);
