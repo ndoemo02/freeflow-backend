@@ -32,8 +32,8 @@ export default async function handler(req, res) {
 async function listRestaurants(req, res) {
   const { city = "Piekary Śląskie" } = req.body?.sessionInfo?.parameters || {};
   
-  // Test z anon key - może service role nie ma uprawnień
-  const { data, error } = await supabaseAnon.from("restaurants").select("id,name,address").limit(10);
+  // Użyj service role key dla lepszych uprawnień
+  const { data, error } = await supabase.from("restaurants").select("id,name,address").limit(10);
   
   const restaurants = data || [];
   const formattedList = restaurants.map((r, i) => `${i+1}) ${r.name} — ${r.address}`).join("\n");
@@ -159,7 +159,7 @@ async function getMenu(req, res) {
     console.log('🍽️ Getting menu for restaurant_id:', restaurant_id);
 
     // Wykonaj zapytanie do tabeli menu_items w Supabase
-    const { data: menuItems, error } = await supabaseAnon
+    const { data: menuItems, error } = await supabase
       .from('menu_items')
       .select('*')
       .eq('business_id', restaurant_id);
