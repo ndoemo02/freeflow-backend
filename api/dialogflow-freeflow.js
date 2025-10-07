@@ -116,7 +116,10 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
             messages: [{ text: { text: [`Wybrano restaurację ${restaurantName}.`] } }]
           },
           sessionInfo: {
-            parameters: { restaurant_id: restaurantId }
+            parameters: {
+              restaurant_id: restaurantId,
+              restaurant_name: restaurantName
+            }
           }
         });
       }
