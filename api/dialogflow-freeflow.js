@@ -139,7 +139,7 @@ async function createOrder(req, res) {
   }
 
   const { data: item, error } = await supabase.from("menu_items")
-    .select("id,name,price_cents").eq("id", menu_item_id).single();
+    .select("id,name,price").eq("id", menu_item_id).single();
 
   console.log('🛒 Supabase query result:', { item, error, menu_item_id });
 
@@ -148,14 +148,14 @@ async function createOrder(req, res) {
     return res.json({ fulfillment_response: { messages: [{ text: { text: ["Nie mam kompletnej pozycji menu."] } }] } });
   }
 
-  const subtotal = item.price_cents * qty;
+  const subtotal = item.price * 100 * qty; // Konwertuj złotówki na grosze
   const { data: order } = await supabase
     .from("orders")
     .insert({ restaurant_id: p.restaurant_id, subtotal_cents: subtotal, total_cents: subtotal, status: "new", eta: "15–20 min" })
     .select("id,eta,total_cents").single();
 
   await supabase.from("order_items").insert({
-    order_id: order.id, menu_item_id: item.id, name: item.name, unit_price_cents: item.price_cents, qty
+    order_id: order.id, menu_item_id: item.id, name: item.name, unit_price_cents: item.price * 100, qty
   });
 
   return res.json({
