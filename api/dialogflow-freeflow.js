@@ -19,6 +19,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
     const params = req.body.sessionInfo?.parameters || {};
 
     console.log("🧭 TAG:", tag);
+    console.log('🧩 DEBUG: parameters =', JSON.stringify(req.body.sessionInfo?.parameters, null, 2));
 
     switch (tag) {
       // =======================================================
