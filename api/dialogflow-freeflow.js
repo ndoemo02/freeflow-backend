@@ -208,7 +208,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         const { data: menuItem } = await supabase
           .from("menu_items")
           .select("name, price")
-          .ilike("name", `%${dish}%`)
+          .or(`name.ilike.%${dish}%, name.ilike.%${dish.split(" ")[1] || dish}%`)
           .eq("restaurant_id", restaurant_id)
           .single();
 
