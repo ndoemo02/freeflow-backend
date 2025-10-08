@@ -78,6 +78,42 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       }
 
       // =======================================================
+      // 1.5️⃣ LIST_RESTAURANTS — lista restauracji z zapamiętaniem w sesji
+      // =======================================================
+      case "list_restaurants": {
+        const { data: restaurants } = await supabase
+          .from("restaurants")
+          .select("id, name")
+          .limit(15);
+
+        if (!restaurants || !restaurants.length) {
+          return res.json({
+            fulfillment_response: {
+              messages: [{ text: { text: ["Nie znalazłem restauracji w okolicy."] } }],
+            },
+          });
+        }
+
+        const list = restaurants.map((r) => ({
+          id: r.id,
+          name: r.name,
+        }));
+
+        const responseText =
+          "Znalazłem te restauracje w okolicy:\n" +
+          list.map((r, i) => `${i + 1}) ${r.name}`).join("\n");
+
+        return res.json({
+          fulfillment_response: { messages: [{ text: { text: [responseText] } }] },
+          sessionInfo: {
+            parameters: {
+              last_restaurant_list: list,
+            },
+          },
+        });
+      }
+
+      // =======================================================
       // 2️⃣ SELECT_RESTAURANT — użytkownik podał nazwę lokalu
       // =======================================================
       case "select_restaurant": {
@@ -87,23 +123,42 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         console.log('🍽 Wybrana restauracja =', restaurantName);
 
-        const restaurantMap = {
-          'callzone': 'bd9f2244-7618-4071-aa96-52616a7b4c70',
-          'bar praha': '8b00b05e-72f7-4a5f-b50c-5630a75d6312',
-          'tasty king kebab': 'fc844513-2869-4f42-b04f-c21e1e4cceb7',
-          'restauracja stara kamienica': '1fc1e782-bac6-47b2-978a-f6f2b38000cd',
-          'dwór hubertus': 'af8448ef-974b-46c8-a4ae-b04b8dc7c9f8',
-          'restauracja rezydencja': '4d27fbe3-20d0-4eb4-b003-1935be53af25',
-          'vien-thien': '70842598-1632-43f6-8015-706d5adf182f',
-          'pizzeria monte carlo': '83566974-1017-4408-90ee-2571cc069878',
-          'burger house': '569a7d29-57be-4224-bdf3-09c483415cea'
-        };
+        let restaurantId = null;
 
-        // znajdź ID po nazwie (case-insensitive)
-        const restaurantId = restaurantMap[restaurantName?.toLowerCase()];
+        // Najpierw sprawdź zapamiętaną listę z sesji
+        const lastRestaurantList = params.last_restaurant_list;
+        if (lastRestaurantList && Array.isArray(lastRestaurantList)) {
+          const foundRestaurant = lastRestaurantList.find(r => 
+            r.name.toLowerCase() === restaurantName?.toLowerCase()
+          );
+          if (foundRestaurant) {
+            restaurantId = foundRestaurant.id;
+            console.log(`✅ Znaleziono w sesji: ${restaurantName} → ${restaurantId}`);
+          }
+        }
+
+        // Jeśli nie znaleziono w sesji, użyj hardcoded mapy jako fallback
+        if (!restaurantId) {
+          const restaurantMap = {
+            'callzone': 'bd9f2244-7618-4071-aa96-52616a7b4c70',
+            'bar praha': '8b00b05e-72f7-4a5f-b50c-5630a75d6312',
+            'tasty king kebab': 'fc844513-2869-4f42-b04f-c21e1e4cceb7',
+            'restauracja stara kamienica': '1fc1e782-bac6-47b2-978a-f6f2b38000cd',
+            'dwór hubertus': 'af8448ef-974b-46c8-a4ae-b04b8dc7c9f8',
+            'restauracja rezydencja': '4d27fbe3-20d0-4eb4-b003-1935be53af25',
+            'vien-thien': '70842598-1632-43f6-8015-706d5adf182f',
+            'pizzeria monte carlo': '83566974-1017-4408-90ee-2571cc069878',
+            'burger house': '569a7d29-57be-4224-bdf3-09c483415cea'
+          };
+
+          restaurantId = restaurantMap[restaurantName?.toLowerCase()];
+          if (restaurantId) {
+            console.log(`✅ Znaleziono w mapie: ${restaurantName} → ${restaurantId}`);
+          }
+        }
 
         if (!restaurantId) {
-          console.log('⚠️ Brak ID w mapie dla:', restaurantName);
+          console.log('⚠️ Brak ID dla:', restaurantName);
           return res.json({
             fulfillment_response: {
               messages: [{ text: { text: ["Nie udało się znaleźć tej restauracji, bajtlu!"] } }]
