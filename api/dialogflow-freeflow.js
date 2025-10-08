@@ -11,6 +11,37 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY
 );
 
+// 🧩 Funkcja inteligentnego dopasowania nazw dań
+function normalizeDishName(dish = "") {
+  if (!dish) return "";
+  const lower = dish.toLowerCase();
+
+  // 🔹 Standardowe uproszczenia i aliasy
+  const replacements = {
+    "hawajska": "pizza hawajska",
+    "hawajską": "pizza hawajska",
+    "margherita": "pizza margherita",
+    "margerita": "pizza margherita",
+    "peperoni": "pizza pepperoni",
+    "pepperoni": "pizza pepperoni",
+    "capriciosa": "pizza capricciosa",
+    "capricciosa": "pizza capricciosa",
+    "kebab box": "kebab box",
+    "kebab": "kebab",
+    "burger": "hamburger",
+    "frytki": "frytki",
+    "cola": "cola",
+    "napój": "napój",
+  };
+
+  // Znajdź dopasowanie częściowe
+  for (const [key, value] of Object.entries(replacements)) {
+    if (lower.includes(key)) return value;
+  }
+
+  return dish;
+}
+
 // --- główny router ---
 app.post("/api/dialogflow-freeflow", async (req, res) => {
   try {
@@ -192,7 +223,8 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         console.log("🧾 DEBUG | parameters =", JSON.stringify(parameters, null, 2));
 
         const restaurant_id = parameters.restaurant_id;
-        const dish = parameters.dish?.resolvedValue || parameters.dish;
+        const dishRaw = parameters.dish?.resolvedValue || parameters.dish;
+        const dish = normalizeDishName(dishRaw);
         const qty = parameters.qty?.resolvedValue || parameters.qty || 1;
         const size = parameters.size?.resolvedValue || parameters.size || "";
 
