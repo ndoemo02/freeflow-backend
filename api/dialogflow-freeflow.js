@@ -184,9 +184,19 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 2.5️⃣ CREATE_ORDER — tworzy zamówienie
       // =======================================================
       case "create_order": {
-        const { restaurant_id, dish, qty, size } = req.body.sessionInfo.parameters;
+        const parameters = {
+          ...req.body.sessionInfo?.parameters,
+          ...req.body.intentInfo?.parameters,
+        };
 
-        // 🧠 Walidacja — sprawdzamy czy agent wie z której restauracji zamawia
+        console.log("🧾 DEBUG | parameters =", JSON.stringify(parameters, null, 2));
+
+        const restaurant_id = parameters.restaurant_id;
+        const dish = parameters.dish?.resolvedValue || parameters.dish;
+        const qty = parameters.qty?.resolvedValue || parameters.qty || 1;
+        const size = parameters.size?.resolvedValue || parameters.size || "";
+
+        // Walidacja danych
         if (!restaurant_id || !dish) {
           return res.json({
             fulfillment_response: {
@@ -197,19 +207,19 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
-        // 🍽️ Pobierz dane restauracji
+        // Pobierz nazwę restauracji
         const { data: restaurant } = await supabase
           .from("restaurants")
           .select("name")
           .eq("id", restaurant_id)
           .single();
 
-        // 🔍 Szukamy dania w menu
+        // Szukamy dania w menu
         const { data: menuItem } = await supabase
           .from("menu_items")
           .select("name, price")
-          .or(`name.ilike.%${dish}%, name.ilike.%${dish.split(" ")[1] || dish}%`)
           .eq("restaurant_id", restaurant_id)
+          .ilike("name", `%${dish}%`)
           .single();
 
         if (!menuItem) {
@@ -222,16 +232,9 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
-        // --- PATCHED: poprawne pobieranie parametrów zamówienia ---
-        const count = qty || 1;
-        const sizeText = size || '';
-        const restaurantName = restaurant?.name || 'nieznana restauracja';
-
-        // 💰 Cena całkowita
-        const totalPrice = menuItem.price * count;
-
-        // 🗣️ Odpowiedź dla użytkownika
-        const responseText = `Zamówienie przyjęte — ${count}x ${dish} ${sizeText ? sizeText + ' ' : ''}z ${restaurantName}, razem ${totalPrice} zł.`;
+        // Obliczenia i odpowiedź
+        const totalPrice = menuItem.price * qty;
+        const responseText = `Zamówienie przyjęte — ${qty}x ${dish} ${size ? size + " " : ""}z ${restaurant?.name || "nieznanej restauracji"}, razem ${totalPrice} zł. 🍕`;
 
         return res.json({
           fulfillment_response: {
