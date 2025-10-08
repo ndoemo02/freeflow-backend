@@ -222,15 +222,16 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
-        // 📏 Ustal ilość i rozmiar
+        // --- PATCHED: poprawne pobieranie parametrów zamówienia ---
         const count = qty || 1;
-        const sizeText = size ? ` (${size})` : "";
+        const sizeText = size || '';
+        const restaurantName = restaurant?.name || 'nieznana restauracja';
 
         // 💰 Cena całkowita
         const totalPrice = menuItem.price * count;
 
         // 🗣️ Odpowiedź dla użytkownika
-        const responseText = `Zamówienie przyjęte — ${count}x ${menuItem.name}${sizeText} z ${restaurant.name}, razem ${totalPrice} zł.`;
+        const responseText = `Zamówienie przyjęte — ${count}x ${dish} ${sizeText ? sizeText + ' ' : ''}z ${restaurantName}, razem ${totalPrice} zł.`;
 
         return res.json({
           fulfillment_response: {
