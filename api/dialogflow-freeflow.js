@@ -181,6 +181,65 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       }
 
       // =======================================================
+      // 2.5️⃣ CREATE_ORDER — tworzy zamówienie
+      // =======================================================
+      case "create_order": {
+        const { restaurant_id, dish, qty, size } = req.body.sessionInfo.parameters;
+
+        // 🧠 Walidacja — sprawdzamy czy agent wie z której restauracji zamawia
+        if (!restaurant_id || !dish) {
+          return res.json({
+            fulfillment_response: {
+              messages: [
+                { text: { text: ["Nie mogę złożyć zamówienia — brakuje danych restauracji lub dania."] } },
+              ],
+            },
+          });
+        }
+
+        // 🍽️ Pobierz dane restauracji
+        const { data: restaurant } = await supabase
+          .from("restaurants")
+          .select("name")
+          .eq("id", restaurant_id)
+          .single();
+
+        // 🔍 Szukamy dania w menu
+        const { data: menuItem } = await supabase
+          .from("menu_items")
+          .select("name, price")
+          .ilike("name", `%${dish}%`)
+          .eq("restaurant_id", restaurant_id)
+          .single();
+
+        if (!menuItem) {
+          return res.json({
+            fulfillment_response: {
+              messages: [
+                { text: { text: [`Nie znalazłem dania ${dish} w menu restauracji ${restaurant?.name || "nieznanej"}.`] } },
+              ],
+            },
+          });
+        }
+
+        // 📏 Ustal ilość i rozmiar
+        const count = qty || 1;
+        const sizeText = size ? ` (${size})` : "";
+
+        // 💰 Cena całkowita
+        const totalPrice = menuItem.price * count;
+
+        // 🗣️ Odpowiedź dla użytkownika
+        const responseText = `Zamówienie przyjęte — ${count}x ${menuItem.name}${sizeText} z ${restaurant.name}, razem ${totalPrice} zł.`;
+
+        return res.json({
+          fulfillment_response: {
+            messages: [{ text: { text: [responseText] } }],
+          },
+        });
+      }
+
+      // =======================================================
       // 3️⃣ GET_MENU — zwraca menu dla wybranej restauracji
       // =======================================================
       case "get_menu": {
