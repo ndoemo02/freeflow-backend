@@ -100,10 +100,20 @@ async function handleHealth(req, res) {
 async function handleTts(req, res) {
   if (req.method === 'POST') {
     try {
-      return res.status(200).json({ 
-        ok: true, 
-        message: 'TTS placeholder (tu podłączymy Google/ElevenLabs)' 
-      });
+      const { text, lang = 'pl-PL', voiceName, gender, audioEncoding = 'MP3' } = req.body;
+
+      if (!text) {
+        return res.status(400).json({ 
+          error: 'Missing text parameter' 
+        });
+      }
+
+      console.log('🎤 TTS Request:', { text: text.substring(0, 100) + '...', lang, voiceName, gender });
+
+      // Import TTS handler dynamically to avoid circular imports
+      const ttsHandler = (await import('./tts.js')).default;
+      return await ttsHandler(req, res);
+      
     } catch (error) {
       console.error('TTS error:', error);
       return res.status(500).json({ 
