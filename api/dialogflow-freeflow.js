@@ -2,20 +2,36 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 
-console.log('🔍 ENV check:', {
-  SUPABASE_URL: !!process.env.SUPABASE_URL,
-  SUPABASE_KEY: !!process.env.SUPABASE_KEY,
-  SERVICE_ROLE: !!process.env.SUPABASE_SERVICE_ROLE,
+// --- 🧠 BEZPIECZNE ŁADOWANIE ENVÓW ---
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE ||
+  process.env.SUPABASE_SECRET_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.SUPABASE_ANON_KEY;
+
+// --- Walidacja środowiska ---
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error('❌ Błąd konfiguracji Supabase:', {
+    hasUrl: !!SUPABASE_URL,
+    hasKey: !!SUPABASE_KEY,
+  });
+  throw new Error('Supabase credentials missing — backend zatrzymany.');
+}
+
+// --- Inicjalizacja Supabase ---
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+console.log('✅ Supabase połączony:', {
+  url: SUPABASE_URL?.replace(/https:\/\/|\.supabase\.co/g, ''),
+  keyType: SUPABASE_KEY?.startsWith('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') ? 'JWT' : 'Other',
 });
 
 const app = express();
 app.use(express.json());
-
-// --- Supabase init ---
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // --- Helper: send response to Dialogflow ---
 const sendMessage = (res, text) =>
@@ -31,6 +47,14 @@ const isUUID = (id = "") => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-
 // --- Main webhook handler ---
 app.post("/api/dialogflow-freeflow", async (req, res) => {
   try {
+    // Sprawdź czy Supabase jest skonfigurowany
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      return res.status(500).json({
+        fulfillment_response: {
+          messages: [{ text: { text: ["Brak konfiguracji Supabase. Sprawdź zmienne środowiskowe w Vercel."] } }],
+        },
+      });
+    }
     const tag = req.body.fulfillmentInfo?.tag;
     const params = req.body.sessionInfo?.parameters || {};
     console.log("🛰️ Webhook tag:", tag);
