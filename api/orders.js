@@ -1,213 +1,125 @@
-// /api/orders.js - Voice Order Processing with GPT Integration
-import express from "express";
 import { createClient } from "@supabase/supabase-js";
 
-const app = express();
-app.use(express.json());
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-// Supabase configuration
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error('❌ Supabase credentials missing');
-}
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// Text normalization for better matching
 function normalize(text) {
   return text
-    .toLowerCase()
-    .replace(/[łŁ]/g, "l")
-    .replace(/[ó]/g, "o")
-    .replace(/[ś]/g, "s")
-    .replace(/[żź]/g, "z")
-    .replace(/[ć]/g, "c")
-    .replace(/[ń]/g, "n")
+    ?.toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[ł]/g, "l")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-// Parse quantity from user query
-function parseQuantityAndQuery(userQuery) {
-  let quantity = 1;
-  let cleaned = userQuery;
-
-  const match = userQuery.match(/(\d+)\s*x\s*(.+)/i);
-  if (match) {
-    quantity = parseInt(match[1]);
-    cleaned = match[2];
-  }
-
-  return { quantity, cleaned };
-}
-
-// GPT Integration - Process voice commands
-async function processVoiceCommandWithGPT(voiceCommand, restaurantId, userEmail) {
-  try {
-    console.log('🤖 Processing voice command with GPT:', { voiceCommand, restaurantId, userEmail });
-
-    // Parse quantity and clean query
-    const { quantity, cleaned } = parseQuantityAndQuery(voiceCommand);
-    
-    console.log('🎯 Extracted:', { dishName: cleaned, quantity });
-    
-    return {
-      dishName: cleaned,
-      quantity,
-      action: 'add_to_cart'
-    };
-    
-  } catch (error) {
-    console.error('❌ GPT processing error:', error);
-    throw error;
-  }
-}
-
-// Find menu item with normalization
-function findMenuItem(menu, query) {
-  const normalizedQuery = normalize(query);
-  return menu.find(item => normalize(item.name).includes(normalizedQuery));
-}
-
-// Search menu items
-async function searchMenuItems(restaurantId, query) {
-  try {
-    const { data, error } = await supabase
-      .from('menu_items')
-      .select('id, name, price')
-      .eq('restaurant_id', restaurantId);
-    
-    if (error) throw error;
-    
-    // Use normalization for better matching
-    const menu = data || [];
-    const foundItem = findMenuItem(menu, query);
-    
-    return foundItem ? [foundItem] : [];
-  } catch (error) {
-    console.error('❌ Menu search error:', error);
-    return [];
-  }
-}
-
-// Add item to cart (create order)
-async function addToCart(dishName, quantity, restaurantId, userEmail) {
-  try {
-    console.log('🛒 Adding to cart:', { dishName, quantity, restaurantId, userEmail });
-    
-    // Find the dish in menu
-    const menuItems = await searchMenuItems(restaurantId, dishName);
-    
-    if (menuItems.length === 0) {
-      throw new Error(`Nie znaleziono "${dishName}" w menu`);
+// Proste dopasowanie z tolerancją na literówki
+function levenshtein(a, b) {
+  const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      matrix[i][j] =
+        b.charAt(i - 1) === a.charAt(j - 1)
+          ? matrix[i - 1][j - 1]
+          : Math.min(
+              matrix[i - 1][j - 1] + 1, // substitution
+              matrix[i][j - 1] + 1,     // insertion
+              matrix[i - 1][j] + 1      // deletion
+            );
     }
-    
-    const menuItem = menuItems[0]; // Take first match
-    const totalPrice = menuItem.price * quantity;
-    
-    // Create order in database
-    const { data, error } = await supabase
-      .from('orders')
-      .insert({
-        user_id: userEmail, // Using email as user_id for now
-        restaurant_id: restaurantId,
-        status: 'pending',
-        total_price: totalPrice,
-        // Note: items field removed as per previous fixes
-      })
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    console.log('✅ Order created:', data);
-    
-    return {
-      success: true,
-      order: data,
-      message: `Dodano ${quantity}x ${menuItem.name} za ${totalPrice} zł`,
-      menuItem: {
-        name: menuItem.name,
-        price: menuItem.price,
-        quantity: quantity,
-        total: totalPrice
-      }
-    };
-    
-  } catch (error) {
-    console.error('❌ Add to cart error:', error);
-    throw error;
   }
+  return matrix[b.length][a.length];
 }
 
-// Main orders endpoint
-app.post('/api/orders', async (req, res) => {
+function findBestMatch(menu, query) {
+  const normQuery = normalize(query);
+  let bestMatch = null;
+  let bestScore = Infinity;
+
+  for (const item of menu) {
+    const normItem = normalize(item.name);
+    const distance = levenshtein(normItem, normQuery);
+
+    // Idealne dopasowanie
+    if (normItem.includes(normQuery)) return item;
+
+    // Najbliższe dopasowanie przy literówkach
+    if (distance < bestScore) {
+      bestScore = distance;
+      bestMatch = item;
+    }
+  }
+
+  // Jeśli różnica <= 2, uznaj za trafienie
+  return bestScore <= 2 ? bestMatch : null;
+}
+
+export default async function handler(req, res) {
   try {
-    const { voice_command, restaurant_id, user_email } = req.body;
-    
-    console.log('📞 Orders API called:', { voice_command, restaurant_id, user_email });
-    
-    if (!voice_command) {
-      return res.status(400).json({
-        error: 'Missing voice_command',
-        message: 'Brak komendy głosowej'
-      });
+    const { message, restaurant_name, user_email } = req.body;
+
+    if (!message || !restaurant_name) {
+      return res.status(400).json({ error: "Brak danych wejściowych" });
     }
-    
-    if (!restaurant_id) {
-      return res.status(400).json({
-        error: 'Missing restaurant_id',
-        message: 'Wybierz restaurację'
-      });
+
+    // Parsowanie liczby (np. "2x pizza diavola")
+    let quantity = 1;
+    let cleaned = message;
+    const match = message.match(/(\d+)\s*x\s*(.+)/i);
+    if (match) {
+      quantity = parseInt(match[1]);
+      cleaned = match[2];
     }
-    
-    // Process voice command with GPT
-    const gptResult = await processVoiceCommandWithGPT(voice_command, restaurant_id, user_email);
-    
-    if (gptResult.action === 'add_to_cart') {
-      // Add to cart
-      const result = await addToCart(
-        gptResult.dishName,
-        gptResult.quantity,
-        restaurant_id,
-        user_email
-      );
-      
+
+    // Pobranie menu z Supabase
+    const { data: menu, error } = await supabase
+      .from("menu_items")
+      .select("*")
+      .eq("restaurant_name", restaurant_name);
+
+    if (error || !menu?.length) {
+      console.error("Błąd pobierania menu:", error);
       return res.json({
-        success: true,
-        action: 'add_to_cart',
-        message: result.message,
-        order: result.order,
-        menuItem: result.menuItem
+        reply: `Nie mogę pobrać menu dla "${restaurant_name}".`,
       });
     }
-    
-    // Default response
-    return res.json({
+
+    // Szukanie najlepszego dopasowania
+    const item = findBestMatch(menu, cleaned);
+
+    if (!item) {
+      return res.json({
+        reply: `Nie znalazłem "${cleaned}" w menu. Spróbuj powiedzieć coś w stylu "pizza" lub "burger".`,
+      });
+    }
+
+    // Zapisz zamówienie do Supabase
+    const { data: order, error: orderErr } = await supabase
+      .from("orders")
+      .insert([
+        {
+          user_email,
+          restaurant_name,
+          item_name: item.name,
+          price: item.price * quantity,
+          quantity,
+          status: "pending",
+        },
+      ])
+      .select();
+
+    if (orderErr) throw orderErr;
+
+    res.json({
       success: true,
-      action: 'processed',
-      message: `Przetworzono komendę: "${voice_command}"`,
-      gptResult
+      reply: `Zamówiłem ${quantity}x ${item.name} w restauracji ${restaurant_name} za ${item.price * quantity} zł.`,
+      order_id: order?.[0]?.id,
     });
-    
-  } catch (error) {
-    console.error('❌ Orders API error:', error);
-    return res.status(500).json({
-      error: 'Orders API error',
-      message: error.message || 'Wystąpił błąd podczas przetwarzania zamówienia'
-    });
+  } catch (err) {
+    console.error("Błąd webhooka:", err);
+    res.status(500).json({ error: err.message });
   }
-});
-
-// Health check
-app.get('/api/orders', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'Orders API is running',
-    features: ['voice_commands', 'gpt_processing', 'menu_search', 'cart_management']
-  });
-});
-
-export default app;
+}
