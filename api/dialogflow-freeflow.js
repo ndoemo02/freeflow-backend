@@ -2,6 +2,12 @@
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 
+console.log('🔍 ENV check:', {
+  SUPABASE_URL: !!process.env.SUPABASE_URL,
+  SUPABASE_KEY: !!process.env.SUPABASE_KEY,
+  SERVICE_ROLE: !!process.env.SUPABASE_SERVICE_ROLE,
+});
+
 const app = express();
 app.use(express.json());
 
