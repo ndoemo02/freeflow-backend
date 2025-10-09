@@ -284,17 +284,38 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 3️⃣ GET_MENU — zwraca menu dla wybranej restauracji
       // =======================================================
       case "get_menu": {
-        const restaurantId =
-          req.body.sessionInfo?.parameters?.restaurant_id ||
-          req.body.sessionInfo?.parameters?.Restaurant_id ||
-          req.body.fulfillmentInfo?.tag === "get_menu" ? req.body.sessionInfo?.parameters?.restaurant_id : null;
+        // --- FIX: Fallback na przypadek, gdy Dialogflow zgubi restaurant_id
+        let restaurantId = parameters.restaurant_id;
 
-        console.log("🧭 DEBUG restaurantId:", restaurantId);
+        if (!restaurantId && parameters.restaurant_name) {
+          console.log("⚠️ Brak restaurant_id, próbuję znaleźć po nazwie:", parameters.restaurant_name);
+
+          // fallback: wyszukaj po nazwie (np. Callzone)
+          const { data: found, error: findErr } = await supabase
+            .from('restaurants')
+            .select('id')
+            .ilike('name', `%${parameters.restaurant_name}%`)
+            .maybeSingle();
+
+          if (found?.id) {
+            restaurantId = found.id;
+            console.log("✅ Odzyskano ID restauracji:", restaurantId);
+          } else {
+            console.log("❌ Nie udało się odzyskać ID restauracji:", findErr);
+          }
+        }
+
         if (!restaurantId) {
           return res.json({
             fulfillment_response: {
-              messages: [{ text: { text: ["Brak ID restauracji w sesji."] } }],
-            },
+              messages: [{
+                text: {
+                  text: [
+                    "Nie udało się znaleźć tej restauracji, bajtlu! Brak ID w sesji i nie znaleziono po nazwie."
+                  ]
+                }
+              }]
+            }
           });
         }
 
