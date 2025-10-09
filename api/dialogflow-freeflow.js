@@ -322,6 +322,42 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
+        // Walidacja: upewnij się, że ID jest poprawnym UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+        if (!restaurantId || typeof restaurantId !== "string" || !uuidRegex.test(restaurantId)) {
+          console.warn("⚠️ Błędny restaurant_id:", restaurantId);
+
+          // spróbuj znaleźć ID po nazwie
+          if (parameters.restaurant_name) {
+            const { data: foundByName } = await supabase
+              .from("restaurants")
+              .select("id")
+              .ilike("name", `%${parameters.restaurant_name}%`)
+              .maybeSingle();
+
+            if (foundByName?.id) {
+              restaurantId = foundByName.id;
+              console.log("✅ Zamieniono na poprawny restaurant_id:", restaurantId);
+            } else {
+              console.error("❌ Nie znaleziono ID po nazwie:", parameters.restaurant_name);
+              return res.json({
+                fulfillment_response: {
+                  messages: [
+                    {
+                      text: {
+                        text: [
+                          "Nie udało się zidentyfikować restauracji. Spróbuj jeszcze raz wybrać z listy!",
+                        ],
+                      },
+                    },
+                  ],
+                },
+              });
+            }
+          }
+        }
+
         const { data: items, error } = await supabase
           .from("menu_items")
           .select("name, price")
