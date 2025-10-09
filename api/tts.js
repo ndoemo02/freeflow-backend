@@ -94,6 +94,12 @@ export default async function tts(req, res) {
       voiceConfig = POLISH_VOICES['pl-PL-Wavenet-A'];
     }
 
+    // Validate and normalize audio encoding
+    const validEncodings = ['MP3', 'LINEAR16', 'OGG_OPUS'];
+    const normalizedEncoding = validEncodings.includes(audioEncoding) ? audioEncoding : 'MP3';
+    
+    console.log('🎵 Audio encoding:', normalizedEncoding);
+
     // Configure the request
     const request = {
       input: { text: text },
@@ -103,27 +109,32 @@ export default async function tts(req, res) {
         ssmlGender: voiceConfig.gender
       },
       audioConfig: {
-        audioEncoding: audioEncoding,
-        speakingRate: 1.0,
-        pitch: 0.0,
-        volumeGainDb: 0.0
+        audioEncoding: normalizedEncoding,
+        speakingRate: speakingRate || 1.0,
+        pitch: pitch || 0.0,
+        volumeGainDb: volumeGainDb || 0.0
       }
     };
 
     console.log('🔄 Sending to Google Cloud TTS...');
+    console.log('📋 Request config:', JSON.stringify(request, null, 2));
     
     // Perform the text-to-speech request
     const [response] = await client.synthesizeSpeech(request);
     
+    if (!response.audioContent) {
+      throw new Error('No audio content received from Google Cloud TTS');
+    }
+    
     // Convert audio content to base64
     const audioContent = response.audioContent.toString('base64');
     
-    console.log('✅ TTS synthesis completed');
+    console.log('✅ TTS synthesis completed, audio size:', audioContent.length);
 
     res.status(200).json({
       ok: true,
       audioContent: audioContent,
-      audioEncoding: audioEncoding,
+      audioEncoding: normalizedEncoding,
       voice: voiceConfig.name,
       language: lang,
       textLength: text.length
