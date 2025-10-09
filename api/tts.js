@@ -86,7 +86,7 @@ export default async function tts(req, res) {
   }
 
   try {
-    const { text, lang = 'pl-PL', voiceName, gender, audioEncoding = 'MP3' } = req.body;
+    const { text, lang = 'pl-PL', voiceName, gender, audioEncoding = 'MP3', speakingRate = 1.0, pitch = 0.0, volumeGainDb = 0.0 } = req.body;
 
     if (!text) {
       return res.status(400).json({ 
@@ -128,9 +128,9 @@ export default async function tts(req, res) {
       },
       audioConfig: {
         audioEncoding: normalizedEncoding,
-        speakingRate: speakingRate || 1.0,
-        pitch: pitch || 0.0,
-        volumeGainDb: volumeGainDb || 0.0
+        speakingRate: speakingRate,
+        pitch: pitch,
+        volumeGainDb: volumeGainDb
       }
     };
 
