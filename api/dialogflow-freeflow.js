@@ -280,10 +280,13 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         });
       }
 
-      // =======================================================
+ // =======================================================
       // 3️⃣ GET_MENU — zwraca menu dla wybranej restauracji
       // =======================================================
       case "get_menu": {
+        const parameters = req.body.sessionInfo?.parameters || {};
+        console.log("🧾 DEBUG | parameters =", JSON.stringify(parameters, null, 2));
+
         // --- FIX: Fallback na przypadek, gdy Dialogflow zgubi restaurant_id
         let restaurantId = parameters.restaurant_id;
 
@@ -319,26 +322,37 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
           });
         }
 
-        const { data: items } = await supabase
+        const { data: items, error } = await supabase
           .from("menu_items")
           .select("name, price")
           .eq("restaurant_id", restaurantId);
 
-        if (!items || !items.length)
+        if (error) {
+          console.error("❌ Błąd zapytania Supabase:", error);
+          return res.json({
+            fulfillment_response: {
+              messages: [{ text: { text: ["Wystąpił problem z pobraniem menu z bazy."] } }],
+            },
+          });
+        }
+
+        if (!items || !items.length) {
           return res.json({
             fulfillment_response: {
               messages: [{ text: { text: ["Menu jest puste lub niedostępne."] } }],
             },
           });
+        }
 
         const menuMsg =
-          "Oto menu:\n" +
+          "Wybrano restaurację. Oto menu:\n" +
           items.map((i) => `• ${i.name} — ${i.price} zł`).join("\n");
 
         return res.json({
           fulfillment_response: { messages: [{ text: { text: [menuMsg] } }] },
         });
       }
+
 
       // =======================================================
       // 0️⃣ DEFAULT — brak tagu
