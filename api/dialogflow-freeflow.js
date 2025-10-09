@@ -230,6 +230,42 @@ app.post('/api/dialogflow-freeflow', async (req, res) => {
       });
     }
 
+    // --- Dodawanie pozycji do menu (bez Dialogflow CX) ---
+    if (tag === 'add_menu_item') {
+      try {
+        const { restaurant_id, name, description, price, category } = p;
+
+        if (!restaurant_id) {
+          return sendMessage(res, "Nie mogę dodać dania — brak ID restauracji.");
+        }
+
+        if (!name || !price) {
+          return sendMessage(res, "Podaj nazwę i cenę dania.");
+        }
+
+        const { data, error } = await supabase
+          .from("menu_items")
+          .insert([
+            {
+              restaurant_id,
+              name,
+              description: description || "",
+              price,
+              category: category || "Inne"
+            }
+          ])
+          .select();
+
+        if (error) throw error;
+
+        console.log("✅ Dodano pozycję do menu:", data[0]);
+        return sendMessage(res, `Dodałem ${name} (${price} zł) do menu restauracji.`);
+      } catch (err) {
+        console.error("❌ Błąd podczas dodawania do menu:", err);
+        return sendMessage(res, "Wystąpił błąd przy dodawaniu dania.");
+      }
+    }
+
     return res.json({ fulfillment_response: { messages: [{ text: { text: ['Brak dopasowanego tagu.'] } }] } });
 
   } catch (err) {
