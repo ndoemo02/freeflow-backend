@@ -26,14 +26,32 @@ function initializeTtsClient() {
       const credentials = JSON.parse(credentialsJson);
       ttsClient = new TextToSpeechClient({ credentials });
     } else {
-      // Local development fallback
-      console.log('⚠️ TTS: Using local service account - tylko do testów lokalnych!');
-      ttsClient = new TextToSpeechClient({ 
-        keyFilename: './service-account.json'
-      });
+      // Try default Google Cloud credentials (for Vercel)
+      console.log('⚠️ TTS: Trying default Google Cloud credentials...');
+      try {
+        ttsClient = new TextToSpeechClient();
+        console.log('✅ TTS: Using default Google Cloud credentials');
+      } catch (defaultError) {
+        console.log('⚠️ TTS: Default credentials failed, trying local service account...');
+        // Local development fallback
+        ttsClient = new TextToSpeechClient({ 
+          keyFilename: './service-account.json'
+        });
+        console.log('✅ TTS: Using local service account');
+      }
     }
   } catch (error) {
     console.error('❌ TTS: Failed to initialize client:', error);
+    console.error('❌ TTS: Error details:', {
+      message: error.message,
+      stack: error.stack,
+      credentials: {
+        GOOGLE_APPLICATION_CREDENTIALS_JSON: process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ? 'Present' : 'Missing',
+        GOOGLE_APPLICATION_CREDENTIALS_BASE64: process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64 ? 'Present' : 'Missing',
+        GOOGLE_CREDENTIALS_PART1: process.env.GOOGLE_CREDENTIALS_PART1 ? 'Present' : 'Missing',
+        GOOGLE_CREDENTIALS_PART2: process.env.GOOGLE_CREDENTIALS_PART2 ? 'Present' : 'Missing'
+      }
+    });
     throw error;
   }
 
