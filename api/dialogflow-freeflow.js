@@ -45,7 +45,7 @@ const sendMessage = (res, text) =>
 const isUUID = (id = "") => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
 // --- Main webhook handler ---
-app.post("/api/dialogflow-freeflow", async (req, res) => {
+app.post('/api/dialogflow-freeflow', async (req, res) => {
   try {
     // Sprawdź czy Supabase jest skonfigurowany
     if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -55,13 +55,14 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
         },
       });
     }
-    const tag = req.body.fulfillmentInfo?.tag;
-    const params = req.body.sessionInfo?.parameters || {};
-    console.log("🛰️ Webhook tag:", tag);
-    console.log("📦 Params:", JSON.stringify(params, null, 2));
 
-    // 1️⃣ ListRestaurants
-    if (tag === "list_restaurants") {
+    const tag = req.body.fulfillmentInfo?.tag;
+    const p = req.body.sessionInfo?.parameters || {}; // <-- wszystko tu jest
+
+    console.log('🛰️ TAG:', tag);
+    console.log('📦 PARAMS:', JSON.stringify(p, null, 2));
+
+    if (tag === 'list_restaurants') {
       const { data, error } = await supabase.from("restaurants").select("id, name, address");
       if (error) throw error;
 
@@ -77,28 +78,42 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       });
     }
 
-    // 2️⃣ ShowMenu
-    if (tag === "show_menu") {
-      const { restaurant_name, restaurant_id, last_restaurant_list } = params;
+    if (tag === 'select_restaurant') {
+      const { restaurant_name, last_restaurant_list } = p;
+      const found = Array.isArray(last_restaurant_list)
+        ? last_restaurant_list.find(r => r.name?.toLowerCase() === restaurant_name?.toLowerCase())
+        : null;
 
-      // Dopasowanie ID po nazwie, jeśli brak
-      let id = restaurant_id;
-      if (!id && Array.isArray(last_restaurant_list)) {
-        const found = last_restaurant_list.find(
-          (r) => r.name.toLowerCase() === restaurant_name?.toLowerCase()
-        );
-        id = found?.id;
+      return res.json({
+        sessionInfo: { parameters: {
+          restaurant_name_temp: found?.name || restaurant_name,
+          restaurant_id: found?.id || p.restaurant_id || null, // zapisujemy na stałe
+        } },
+        fulfillment_response: { messages: [{ text: { text: [
+          found ? `OK, wybieram ${found.name}.` : `Próbuję z ${restaurant_name}…`
+        ] } }] }
+      });
+    }
+
+    if (tag === 'get_menu') {
+      let { restaurant_id, restaurant_name, last_restaurant_list } = p;
+
+      // awaryjnie dopasuj ID po nazwie
+      if (!restaurant_id && Array.isArray(last_restaurant_list)) {
+        const f = last_restaurant_list.find(r => r.name?.toLowerCase() === restaurant_name?.toLowerCase());
+        restaurant_id = f?.id || null;
       }
 
-      if (!id || !isUUID(id)) {
-        console.warn("⚠️ Niepoprawny restaurant_id:", id);
-        return sendMessage(res, "Nie mogę znaleźć tej restauracji w bazie.");
+      if (!restaurant_id) {
+        return res.json({ fulfillment_response: { messages: [{ text: { text: [
+          'Nie mogę znaleźć tej restauracji. Powiedz nazwę jeszcze raz.'
+        ] } }] } });
       }
 
       const { data, error } = await supabase
         .from("menu_items")
         .select("name, price")
-        .eq("restaurant_id", id);
+        .eq("restaurant_id", restaurant_id);
 
       if (error) {
         console.error("❌ Błąd zapytania Supabase:", error);
@@ -111,8 +126,7 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       return sendMessage(res, `Menu restauracji ${restaurant_name}:\n${menuList}`);
     }
 
-    // 3️⃣ Default fallback
-    return sendMessage(res, "Nie rozumiem zapytania (brak dopasowanego tagu).");
+    return res.json({ fulfillment_response: { messages: [{ text: { text: ['Brak dopasowanego tagu.'] } }] } });
 
   } catch (err) {
     console.error("💥 Błąd webhooka:", err);
