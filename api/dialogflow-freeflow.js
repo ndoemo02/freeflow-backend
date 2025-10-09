@@ -222,7 +222,12 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
 
         console.log("🧾 DEBUG | parameters =", JSON.stringify(parameters, null, 2));
 
-        const restaurant_id = parameters.restaurant_id;
+        const restaurant_id =
+          req.body.sessionInfo?.parameters?.restaurant_id ||
+          req.body.sessionInfo?.parameters?.Restaurant_id ||
+          req.body.fulfillmentInfo?.tag === "get_menu" ? req.body.sessionInfo?.parameters?.restaurant_id : null;
+
+        console.log("🧭 DEBUG restaurantId:", restaurant_id);
         const dishRaw = parameters.dish?.resolvedValue || parameters.dish;
         const dish = normalizeDishName(dishRaw);
         const qty = parameters.qty?.resolvedValue || parameters.qty || 1;
@@ -279,7 +284,12 @@ app.post("/api/dialogflow-freeflow", async (req, res) => {
       // 3️⃣ GET_MENU — zwraca menu dla wybranej restauracji
       // =======================================================
       case "get_menu": {
-        const restaurantId = params.restaurant_id;
+        const restaurantId =
+          req.body.sessionInfo?.parameters?.restaurant_id ||
+          req.body.sessionInfo?.parameters?.Restaurant_id ||
+          req.body.fulfillmentInfo?.tag === "get_menu" ? req.body.sessionInfo?.parameters?.restaurant_id : null;
+
+        console.log("🧭 DEBUG restaurantId:", restaurantId);
         if (!restaurantId) {
           return res.json({
             fulfillment_response: {
