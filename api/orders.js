@@ -15,54 +15,46 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Text normalization for better matching
+function normalize(text) {
+  return text
+    .toLowerCase()
+    .replace(/[łŁ]/g, "l")
+    .replace(/[ó]/g, "o")
+    .replace(/[ś]/g, "s")
+    .replace(/[żź]/g, "z")
+    .replace(/[ć]/g, "c")
+    .replace(/[ń]/g, "n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Parse quantity from user query
+function parseQuantityAndQuery(userQuery) {
+  let quantity = 1;
+  let cleaned = userQuery;
+
+  const match = userQuery.match(/(\d+)\s*x\s*(.+)/i);
+  if (match) {
+    quantity = parseInt(match[1]);
+    cleaned = match[2];
+  }
+
+  return { quantity, cleaned };
+}
+
 // GPT Integration - Process voice commands
 async function processVoiceCommandWithGPT(voiceCommand, restaurantId, userEmail) {
   try {
     console.log('🤖 Processing voice command with GPT:', { voiceCommand, restaurantId, userEmail });
 
-    // For now, we'll use a simple rule-based approach
-    // Later this can be replaced with actual GPT API call
+    // Parse quantity and clean query
+    const { quantity, cleaned } = parseQuantityAndQuery(voiceCommand);
     
-    const command = voiceCommand.toLowerCase().trim();
-    
-    // Extract dish name and quantity
-    let dishName = '';
-    let quantity = 1;
-    
-    // Simple pattern matching
-    const quantityMatch = command.match(/(\d+)\s*x?\s*/);
-    if (quantityMatch) {
-      quantity = parseInt(quantityMatch[1]);
-    }
-    
-    // Remove quantity from command to get dish name
-    dishName = command.replace(/(\d+)\s*x?\s*/, '').trim();
-    
-    // Common dish name mappings
-    const dishMappings = {
-      'pizza': 'pizza',
-      'burger': 'burger',
-      'frytki': 'frytki',
-      'cola': 'cola',
-      'gulasz': 'gulasz wieprzowy z knedlikiem',
-      'pierogi': 'pierogi z mięsem',
-      'sýr': 'smažený sýr',
-      'zupa': 'zupa czosnkowa',
-      'czosnkowa': 'zupa czosnkowa (česnečka)'
-    };
-    
-    // Find best match
-    for (const [key, value] of Object.entries(dishMappings)) {
-      if (dishName.includes(key)) {
-        dishName = value;
-        break;
-      }
-    }
-    
-    console.log('🎯 Extracted:', { dishName, quantity });
+    console.log('🎯 Extracted:', { dishName: cleaned, quantity });
     
     return {
-      dishName,
+      dishName: cleaned,
       quantity,
       action: 'add_to_cart'
     };
@@ -73,17 +65,27 @@ async function processVoiceCommandWithGPT(voiceCommand, restaurantId, userEmail)
   }
 }
 
+// Find menu item with normalization
+function findMenuItem(menu, query) {
+  const normalizedQuery = normalize(query);
+  return menu.find(item => normalize(item.name).includes(normalizedQuery));
+}
+
 // Search menu items
 async function searchMenuItems(restaurantId, query) {
   try {
     const { data, error } = await supabase
       .from('menu_items')
       .select('id, name, price')
-      .eq('restaurant_id', restaurantId)
-      .ilike('name', `%${query}%`);
+      .eq('restaurant_id', restaurantId);
     
     if (error) throw error;
-    return data || [];
+    
+    // Use normalization for better matching
+    const menu = data || [];
+    const foundItem = findMenuItem(menu, query);
+    
+    return foundItem ? [foundItem] : [];
   } catch (error) {
     console.error('❌ Menu search error:', error);
     return [];

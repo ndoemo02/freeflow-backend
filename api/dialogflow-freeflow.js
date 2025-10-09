@@ -44,6 +44,40 @@ const sendMessage = (res, text) =>
 // --- Helper: UUID-safe validation ---
 const isUUID = (id = "") => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
+// --- Helper: Text normalization for better matching ---
+function normalize(text) {
+  return text
+    .toLowerCase()
+    .replace(/[łŁ]/g, "l")
+    .replace(/[ó]/g, "o")
+    .replace(/[ś]/g, "s")
+    .replace(/[żź]/g, "z")
+    .replace(/[ć]/g, "c")
+    .replace(/[ń]/g, "n")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// --- Helper: Find menu item with normalization ---
+function findMenuItem(menu, query) {
+  const normalizedQuery = normalize(query);
+  return menu.find(item => normalize(item.name).includes(normalizedQuery));
+}
+
+// --- Helper: Parse quantity from user query ---
+function parseQuantityAndQuery(userQuery) {
+  let quantity = 1;
+  let cleaned = userQuery;
+
+  const match = userQuery.match(/(\d+)\s*x\s*(.+)/i);
+  if (match) {
+    quantity = parseInt(match[1]);
+    cleaned = match[2];
+  }
+
+  return { quantity, cleaned };
+}
+
 // --- Main webhook handler ---
 app.post('/api/dialogflow-freeflow', async (req, res) => {
   try {
@@ -124,6 +158,76 @@ app.post('/api/dialogflow-freeflow', async (req, res) => {
 
       const menuList = data.map((i) => `• ${i.name} — ${i.price} zł`).join("\n");
       return sendMessage(res, `Menu restauracji ${restaurant_name}:\n${menuList}`);
+    }
+
+    if (tag === 'create_order') {
+      let { restaurant_id, restaurant_name, last_restaurant_list, dish, user_query } = p;
+
+      // awaryjnie dopasuj ID po nazwie
+      if (!restaurant_id && Array.isArray(last_restaurant_list)) {
+        const f = last_restaurant_list.find(r => r.name?.toLowerCase() === restaurant_name?.toLowerCase());
+        restaurant_id = f?.id || null;
+      }
+
+      if (!restaurant_id) {
+        return res.json({ fulfillment_response: { messages: [{ text: { text: [
+          'Nie mogę znaleźć tej restauracji. Wybierz restaurację z listy.'
+        ] } }] } });
+      }
+
+      // Pobierz menu restauracji
+      const { data: menu, error } = await supabase
+        .from("menu_items")
+        .select("id, name, price")
+        .eq("restaurant_id", restaurant_id);
+
+      if (error) {
+        console.error("❌ Błąd zapytania menu:", error);
+        return sendMessage(res, "Wystąpił problem z pobraniem menu z bazy.");
+      }
+
+      if (!menu?.length) {
+        return sendMessage(res, "Ta restauracja nie ma jeszcze dodanego menu.");
+      }
+
+      // Użyj user_query jeśli dish nie jest dostępne
+      const query = user_query || dish || '';
+      
+      if (!query) {
+        return sendMessage(res, "Nie wiem co chcesz zamówić. Powiedz nazwę dania.");
+      }
+
+      // Parse quantity and clean query
+      const { quantity, cleaned } = parseQuantityAndQuery(query);
+      
+      // Find menu item with normalization
+      const item = findMenuItem(menu, cleaned);
+      
+      if (!item) {
+        return sendMessage(res, `Nie znalazłem "${cleaned}" w menu. Spróbuj powiedzieć "pizza" lub "burger".`);
+      }
+
+      // Calculate total price
+      const totalPrice = item.price * quantity;
+
+      // Create order response
+      const responseText = `Zamówienie przyjęte — ${quantity}x ${item.name} z ${restaurant_name}, razem ${totalPrice} zł. 🍕`;
+
+      return res.json({
+        fulfillment_response: {
+          messages: [{ text: { text: [responseText] } }],
+        },
+        sessionInfo: {
+          parameters: {
+            ...p,
+            menuItem: item.name,
+            menuItemId: item.id,
+            quantity: quantity,
+            price: item.price,
+            totalPrice: totalPrice
+          }
+        }
+      });
     }
 
     return res.json({ fulfillment_response: { messages: [{ text: { text: ['Brak dopasowanego tagu.'] } }] } });
