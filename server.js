@@ -36,8 +36,207 @@ const initClients = () => {
 
 const upload = multer({ storage: multer.memoryStorage() });
 
+// TTS endpoint (before test-flow router)
+app.post("/api/tts", async (req, res) => {
+  initClients();
+  
+  try {
+    const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing text field" });
+
+    const request = {
+      input: { text },
+      voice: { languageCode, name: voice },
+      audioConfig: { audioEncoding: 'MP3' },
+    };
+
+    console.log("🎤 Generating voice for:", text);
+    const [response] = await ttsClient.synthesizeSpeech(request);
+
+    if (!response.audioContent) throw new Error("Empty audio content from Google TTS");
+
+    const audioBuffer = Buffer.from(response.audioContent, 'base64');
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.status(200).send(audioBuffer);
+
+  } catch (error) {
+    console.error("❌ TTS handler error:", error.message);
+    res.status(500).json({
+      ok: false,
+      error: 'TTS_ERROR',
+      message: error.message,
+      hint: 'Check Google credentials or API quota'
+    });
+  }
+});
+
+// FreeFlow Brain endpoint (before test-flow router)
+app.post("/api/freeflow-brain", async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  try {
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: "Missing text parameter" 
+      });
+    }
+
+    console.log("🧠 FreeFlow Brain processing:", text);
+
+    // Na start - prosta logika zamiast DF
+    let reply = "Nie do końca rozumiem, możesz powtórzyć?";
+    
+    // Pizza logic
+    if (text.match(/pizza|margherita|pepperoni|capricciosa/i)) {
+      reply = "Mam dziś promocję na pizzę! Margherita 25zł, Pepperoni 28zł. Którą wybierasz?";
+    }
+    // Burger logic
+    else if (text.match(/burger|hamburger|cheeseburger/i)) {
+      reply = "Burger Classic z sosem freeflow, polecam! Z frytkami i colą 32zł.";
+    }
+    // Kebab logic
+    else if (text.match(/kebab|kebap|döner/i)) {
+      reply = "Kebab z baraniny, świeży, pachnący czosnkiem 😎 Z sałatką 18zł.";
+    }
+    // Taxi logic
+    else if (text.match(/taxi|taksówka|przejazd|dowóz/i)) {
+      reply = "Zamawiam taksówkę! Dokąd jedziemy? Podaj adres docelowy.";
+    }
+    // Hotel logic
+    else if (text.match(/hotel|nocleg|apartament|pokój/i)) {
+      reply = "Mam dostępne pokoje! Na ile nocy? Jaki standard preferujesz?";
+    }
+    // Greeting logic
+    else if (text.match(/cześć|witaj|dzień dobry|hej/i)) {
+      reply = "Cześć! Jestem FreeFlow - pomogę Ci zamówić jedzenie, taksówkę lub hotel. Co Cię interesuje?";
+    }
+    // Help logic
+    else if (text.match(/pomoc|help|co możesz|menu/i)) {
+      reply = "Mogę pomóc Ci z: 🍕 Jedzeniem, 🚕 Taksówką, 🏨 Hotelem. Powiedz co Cię interesuje!";
+    }
+    // Order logic
+    else if (text.match(/zamów|zamawiam|chcę|potrzebuję/i)) {
+      reply = "Świetnie! Co chcesz zamówić? Pizza, burger, kebab, taksówka czy hotel?";
+    }
+
+    console.log("🧠 FreeFlow Brain response:", reply);
+
+    return res.status(200).json({
+      ok: true,
+      response: reply,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ FreeFlow brain error:", err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err.message 
+    });
+  }
+});
+
 // Use test flow router
 app.use("/api", testFlowRouter);
+
+// Add agent endpoint
+app.post("/api/agent", async (req, res) => {
+  initClients();
+  
+  try {
+    const { message, sessionId, userId, context } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ 
+        error: 'Missing message parameter' 
+      });
+    }
+
+    console.log('🤖 Agent processing:', { 
+      message: message.substring(0, 100) + '...', 
+      sessionId, 
+      userId,
+      context: context || 'brak'
+    });
+
+    // Simple agent response using OpenAI
+    const systemPrompt = `
+    Jesteś Ekspertem Doradztwa FreeFlow — inteligentnym asystentem 
+    wspierającym w personalizacji usług gastronomicznych, transportowych 
+    (taksówkarskich) oraz hotelarsko-wypoczynkowych. 
+    Pomagasz zarówno klientom indywidualnym, jak i firmowym.
+
+    Twoje zadania:
+    - Analizuj potrzeby użytkownika i proponuj konkretne rozwiązania.
+    - Uwzględniaj lokalny kontekst i preferencje (np. Katowice, Piekary Śląskie).
+    - Bądź naturalny, profesjonalny i rzeczowy, ale nie sztywny.
+    - Zawsze kończ odpowiedź konkretną rekomendacją lub kolejnym pytaniem kontekstowym.
+    - Odpowiadaj krótko i konkretnie (max 2-3 zdania).
+
+    Kontekst rozmowy: ${context || "brak"}
+    `;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message },
+      ],
+      temperature: 0.8,
+      max_tokens: 200,
+    });
+
+    const responseText = completion.choices[0].message.content;
+    
+    // Generate TTS audio
+    const [ttsResponse] = await ttsClient.synthesizeSpeech({
+      input: { text: responseText },
+      voice: { 
+        languageCode: 'pl-PL', 
+        name: 'pl-PL-Wavenet-A',
+        ssmlGender: 'FEMALE'
+      },
+      audioConfig: { 
+        audioEncoding: 'MP3',
+        speakingRate: 1.0,
+        pitch: 0.0
+      }
+    });
+
+    const audioContent = ttsResponse.audioContent ? ttsResponse.audioContent.toString('base64') : null;
+    
+    const response = {
+      ok: true,
+      sessionId: sessionId || `session_${Date.now()}`,
+      userId: userId || 'anonymous',
+      timestamp: new Date().toISOString(),
+      userMessage: message,
+      agentResponse: {
+        text: responseText,
+        action: "general_help",
+        confidence: 0.8
+      },
+      audioContent: audioContent,
+      audioEncoding: 'MP3'
+    };
+
+    console.log('✅ Agent response ready, audio size:', audioContent ? audioContent.length : 'none');
+    res.status(200).json(response);
+
+  } catch (err) {
+    console.error("❌ Agent error:", err);
+    res.status(500).json({ 
+      ok: false,
+      error: "Agent error", 
+      message: err.message 
+    });
+  }
+});
 
 // Add direct STT endpoint for frontend proxy
 app.post("/api/stt", upload.single("audio"), async (req, res) => {
