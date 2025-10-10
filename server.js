@@ -98,14 +98,13 @@ app.post("/tts", async (req, res) => {
 
     const [response] = await ttsClient.synthesizeSpeech({
       input: { text },
-      voice: { languageCode: "pl-PL", name: "pl-PL-Wavenet-E" },
+      voice: { languageCode: "pl-PL", name: "pl-PL-Wavenet-A" },
       audioConfig: { audioEncoding: "MP3", speakingRate: 1.05 },
     });
 
-    const outputFile = `tts_${Date.now()}.mp3`;
-    fs.writeFileSync(outputFile, response.audioContent, "binary");
-    console.log("🔊 Wygenerowano TTS:", outputFile);
-    res.download(outputFile, () => fs.unlinkSync(outputFile));
+    console.log("🔊 Wygenerowano TTS z Google Cloud");
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(response.audioContent);
   } catch (err) {
     console.error("❌ Błąd TTS:", err);
     res.status(500).json({ error: "Błąd generowania głosu" });

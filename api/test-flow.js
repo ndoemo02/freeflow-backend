@@ -257,6 +257,89 @@ router.post("/test-gpt", async (req, res) => {
   }
 });
 
+// Main TTS endpoint
+router.post("/tts", async (req, res) => {
+  initClients();
+  
+  try {
+    const { text, lang = 'pl-PL', voiceName, gender, audioEncoding = 'MP3', speakingRate = 1.0, pitch = 0.0, volumeGainDb = 0.0 } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ 
+        error: 'Missing text parameter' 
+      });
+    }
+
+    console.log('🎤 TTS Request:', { text: text.substring(0, 100) + '...', lang, voiceName, gender });
+
+    // Polish voice configurations
+    const POLISH_VOICES = {
+      'pl-PL-Wavenet-A': { name: 'pl-PL-Wavenet-A', gender: 'FEMALE' },
+      'pl-PL-Wavenet-B': { name: 'pl-PL-Wavenet-B', gender: 'MALE' },
+      'pl-PL-Wavenet-C': { name: 'pl-PL-Wavenet-C', gender: 'FEMALE' },
+      'pl-PL-Wavenet-D': { name: 'pl-PL-Wavenet-D', gender: 'MALE' },
+      'pl-PL-Standard-A': { name: 'pl-PL-Standard-A', gender: 'FEMALE' },
+      'pl-PL-Standard-B': { name: 'pl-PL-Standard-B', gender: 'MALE' },
+      'pl-PL-Standard-C': { name: 'pl-PL-Standard-C', gender: 'FEMALE' },
+      'pl-PL-Standard-D': { name: 'pl-PL-Standard-D', gender: 'MALE' }
+    };
+
+    // Determine voice configuration
+    let voiceConfig;
+    if (voiceName && POLISH_VOICES[voiceName]) {
+      voiceConfig = POLISH_VOICES[voiceName];
+    } else if (gender) {
+      const genderVoices = Object.values(POLISH_VOICES).filter(v => v.gender === gender.toUpperCase());
+      voiceConfig = genderVoices[0] || POLISH_VOICES['pl-PL-Wavenet-A'];
+    } else {
+      voiceConfig = POLISH_VOICES['pl-PL-Wavenet-A'];
+    }
+
+    // Validate and normalize audio encoding
+    const validEncodings = ['MP3', 'LINEAR16', 'OGG_OPUS'];
+    const normalizedEncoding = validEncodings.includes(audioEncoding) ? audioEncoding : 'MP3';
+    
+    console.log('🎵 Audio encoding:', normalizedEncoding);
+
+    // Configure the request
+    const request = {
+      input: { text: text },
+      voice: {
+        languageCode: lang,
+        name: voiceConfig.name,
+        ssmlGender: voiceConfig.gender
+      },
+      audioConfig: {
+        audioEncoding: normalizedEncoding,
+        speakingRate: speakingRate,
+        pitch: pitch,
+        volumeGainDb: volumeGainDb
+      }
+    };
+
+    console.log('🔄 Sending to Google Cloud TTS...');
+    
+    // Perform the text-to-speech request
+    const [response] = await ttsClient.synthesizeSpeech(request);
+    
+    if (!response.audioContent) {
+      throw new Error('No audio content received from Google Cloud TTS');
+    }
+    
+    console.log('✅ TTS synthesis completed, audio size:', response.audioContent.length);
+
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(response.audioContent);
+  } catch (err) {
+    console.error("TTS error:", err);
+    res.status(500).json({
+      ok: false,
+      error: "TTS_ERROR",
+      message: err.message,
+    });
+  }
+});
+
 router.post("/test-tts", async (req, res) => {
   initClients();
   
