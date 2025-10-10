@@ -141,6 +141,161 @@ app.post("/api/freeflow-brain", async (req, res) => {
   }
 });
 
+// FreeFlow Brain endpoint
+app.post("/api/brain", async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  try {
+    const { text, sessionId, userId } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: "Missing text parameter" 
+      });
+    }
+
+    console.log("🧠 FreeFlow Brain processing:", { text, sessionId, userId });
+
+    // Smart conversation logic
+    let reply = "Nie do końca rozumiem, możesz powtórzyć?";
+    
+    // Pizza logic
+    if (text.match(/pizza|margherita|pepperoni|capricciosa/i)) {
+      reply = "Mam dziś promocję na pizzę! Margherita 25zł, Pepperoni 28zł. Którą wybierasz?";
+    }
+    // Burger logic
+    else if (text.match(/burger|hamburger|cheeseburger/i)) {
+      reply = "Burger Classic z sosem freeflow, polecam! Z frytkami i colą 32zł.";
+    }
+    // Kebab logic
+    else if (text.match(/kebab|kebap|döner/i)) {
+      reply = "Kebab z baraniny, świeży, pachnący czosnkiem 😎 Z sałatką 18zł.";
+    }
+    // Taxi logic
+    else if (text.match(/taxi|taksówka|przejazd|dowóz/i)) {
+      reply = "Zamawiam taksówkę! Dokąd jedziemy? Podaj adres docelowy.";
+    }
+    // Hotel logic
+    else if (text.match(/hotel|nocleg|apartament|pokój/i)) {
+      reply = "Mam dostępne pokoje! Na ile nocy? Jaki standard preferujesz?";
+    }
+    // Greeting logic
+    else if (text.match(/cześć|witaj|dzień dobry|hej/i)) {
+      reply = "Cześć! Jestem FreeFlow - pomogę Ci zamówić jedzenie, taksówkę lub hotel. Co Cię interesuje?";
+    }
+    // Help logic
+    else if (text.match(/pomoc|help|co możesz|menu/i)) {
+      reply = "Mogę pomóc Ci z: 🍕 Jedzeniem, 🚕 Taksówką, 🏨 Hotelem. Powiedz co Cię interesuje!";
+    }
+    // Order logic
+    else if (text.match(/zamów|zamawiam|chcę|potrzebuję/i)) {
+      reply = "Świetnie! Co chcesz zamówić? Pizza, burger, kebab, taksówka czy hotel?";
+    }
+
+    console.log("🧠 FreeFlow Brain response:", reply);
+
+    return res.status(200).json({
+      ok: true,
+      response: reply,
+      sessionId: sessionId || 'default',
+      userId: userId || 'anonymous',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ FreeFlow brain error:", err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err.message 
+    });
+  }
+});
+
+// Sessions API endpoint
+app.post("/api/sessions", async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  try {
+    const { action, sessionId, userId, message, eventType, data } = req.body;
+
+    // Initialize Supabase client
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
+    switch (action) {
+      case 'create_session':
+        const { data: session, error: sessionError } = await supabase
+          .from('sessions')
+          .insert([{
+            id: sessionId,
+            user_id: userId,
+            created_at: new Date().toISOString(),
+            status: 'active'
+          }])
+          .select();
+        
+        if (sessionError) throw sessionError;
+        return res.status(200).json({ ok: true, session });
+
+      case 'save_message':
+        const { data: messageData, error: messageError } = await supabase
+          .from('messages')
+          .insert([{
+            session_id: sessionId,
+            user_id: userId,
+            content: message.content,
+            role: message.role, // 'user' or 'assistant'
+            timestamp: new Date().toISOString()
+          }])
+          .select();
+        
+        if (messageError) throw messageError;
+        return res.status(200).json({ ok: true, message: messageData });
+
+      case 'log_event':
+        const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .insert([{
+            session_id: sessionId,
+            user_id: userId,
+            event_type: eventType,
+            data: data,
+            timestamp: new Date().toISOString()
+          }])
+          .select();
+        
+        if (eventError) throw eventError;
+        return res.status(200).json({ ok: true, event: eventData });
+
+      case 'get_session_history':
+        const { data: history, error: historyError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('session_id', sessionId)
+          .order('timestamp', { ascending: true });
+        
+        if (historyError) throw historyError;
+        return res.status(200).json({ ok: true, history });
+
+      default:
+        return res.status(400).json({ ok: false, error: 'Invalid action' });
+    }
+  } catch (error) {
+    console.error('❌ Sessions API error:', error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 // Use test flow router
 app.use("/api", testFlowRouter);
 

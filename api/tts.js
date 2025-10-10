@@ -55,7 +55,8 @@ export default async function handler(req, res) {
 
     const audioBuffer = Buffer.from(response.audioContent, 'base64');
     res.setHeader('Content-Type', 'audio/mpeg');
-    res.status(200).send(audioBuffer);
+    res.setHeader('Content-Length', audioBuffer.length);
+    res.status(200).end(audioBuffer);
 
   } catch (error) {
     console.error("❌ TTS handler error:", error.message);
