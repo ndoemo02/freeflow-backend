@@ -565,5 +565,19 @@ app.post("/tts", async (req, res) => {
   }
 });
 
+// === [4] REALTIME TOKEN ENDPOINT ===
+app.get("/api/realtime-token", async (req, res) => {
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: "Brak klucza OPENAI_API_KEY w środowisku" });
+    }
+    res.status(200).json({ apiKey });
+  } catch (err) {
+    console.error("❌ Błąd realtime-token:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 FreeFlow Voice Expert działa na porcie ${PORT}`));
