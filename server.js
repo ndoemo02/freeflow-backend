@@ -31,25 +31,7 @@ app.use(cors({
 
 app.use(express.json());
 
-// Handle preflight requests for all routes
-app.options('*', (req, res) => {
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  res.status(200).end();
-});
+// CORS is handled by the cors middleware above
 
 // Initialize clients inside functions to ensure env vars are loaded
 let openai, sttClient, ttsClient;
