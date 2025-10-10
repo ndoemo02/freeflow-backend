@@ -1,9 +1,11 @@
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
-// Initialize TTS client
+// Initialize clients
 let ttsClient;
 let openaiClient;
+let supabaseClient;
 
 // Initialize OpenAI client
 function initializeOpenAI() {
@@ -20,6 +22,24 @@ function initializeOpenAI() {
   }
   
   return openaiClient;
+}
+
+// Initialize Supabase client
+function initializeSupabase() {
+  if (supabaseClient) return supabaseClient;
+  
+  try {
+    supabaseClient = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_KEY
+    );
+    console.log('✅ Supabase client initialized');
+  } catch (error) {
+    console.error('❌ Supabase initialization error:', error);
+    throw error;
+  }
+  
+  return supabaseClient;
 }
 
 function initializeTtsClient() {
@@ -47,10 +67,77 @@ function initializeTtsClient() {
   return ttsClient;
 }
 
-// Generate agent response using OpenAI
-async function generateAgentResponse(message, context = "") {
+// Supabase helper functions
+async function getRestaurants() {
+  try {
+    const supabase = initializeSupabase();
+    const { data, error } = await supabase.from('restaurants').select('*');
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('❌ Error fetching restaurants:', error);
+    return [];
+  }
+}
+
+async function getMenuItems(restaurantId) {
+  try {
+    const supabase = initializeSupabase();
+    const { data, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('restaurant_id', restaurantId);
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('❌ Error fetching menu items:', error);
+    return [];
+  }
+}
+
+async function createOrder(orderData) {
+  try {
+    const supabase = initializeSupabase();
+    const { data, error } = await supabase
+      .from('orders')
+      .insert([orderData])
+      .select();
+    if (error) throw error;
+    return data?.[0] || null;
+  } catch (error) {
+    console.error('❌ Error creating order:', error);
+    throw error;
+  }
+}
+
+async function getUserOrders(userEmail) {
+  try {
+    const supabase = initializeSupabase();
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('user_email', userEmail)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('❌ Error fetching user orders:', error);
+    return [];
+  }
+}
+
+// Generate agent response using OpenAI with Supabase integration
+async function generateAgentResponse(message, context = "", userId = null) {
   try {
     const openai = initializeOpenAI();
+    
+    // Get real data from Supabase
+    const restaurants = await getRestaurants();
+    const userOrders = userId ? await getUserOrders(userId) : [];
+    
+    // Build context with real data
+    const restaurantsList = restaurants.map(r => `${r.name} (${r.cuisine_type || 'restauracja'})`).join(', ');
+    const recentOrders = userOrders.slice(0, 3).map(o => `${o.item_name} z ${o.restaurant_name}`).join(', ');
     
     const systemPrompt = `
     Jesteś Ekspertem Doradztwa FreeFlow — inteligentnym asystentem 
@@ -58,13 +145,17 @@ async function generateAgentResponse(message, context = "") {
     (taksówkarskich) oraz hotelarsko-wypoczynkowych. 
     Pomagasz zarówno klientom indywidualnym, jak i firmowym.
 
+    DOSTĘPNE RESTAURACJE: ${restaurantsList}
+    OSTATNIE ZAMÓWIENIA: ${recentOrders || 'brak'}
+    
     Twoje zadania:
-    - Analizuj potrzeby użytkownika i proponuj konkretne rozwiązania (restauracje, trasy, hotele).
+    - Analizuj potrzeby użytkownika i proponuj konkretne rozwiązania z dostępnych restauracji.
     - Uwzględniaj lokalny kontekst i preferencje (np. Katowice, Piekary Śląskie).
     - Bądź naturalny, profesjonalny i rzeczowy, ale nie sztywny.
     - Możesz proponować współpracę z lokalnymi firmami.
     - Zawsze kończ odpowiedź konkretną rekomendacją lub kolejnym pytaniem kontekstowym.
     - Odpowiadaj krótko i konkretnie (max 2-3 zdania).
+    - Jeśli użytkownik chce zamówić jedzenie, zaproponuj konkretne restauracje z listy.
 
     Kontekst rozmowy: ${context || "brak"}
     `;
@@ -81,25 +172,82 @@ async function generateAgentResponse(message, context = "") {
 
     const responseText = completion.choices[0].message.content;
     
-    // Determine action based on response content
+    // Determine action and execute if needed
     let action = "general_help";
     let confidence = 0.8;
+    let supabaseAction = null;
     
+    const lowerMessage = message.toLowerCase();
     const lowerResponse = responseText.toLowerCase();
-    if (lowerResponse.includes('zamów') || lowerResponse.includes('zamow')) {
+    
+    // Check for food ordering intent
+    if (lowerMessage.includes('zamów') || lowerMessage.includes('zamow') || 
+        lowerMessage.includes('pizza') || lowerMessage.includes('burger') ||
+        lowerMessage.includes('jedzenie') || lowerMessage.includes('menu')) {
+      
       action = "food_order";
+      
+      // Try to extract restaurant and item from message
+      const restaurantMatch = restaurants.find(r => 
+        lowerMessage.includes(r.name.toLowerCase())
+      );
+      
+      if (restaurantMatch) {
+        const menuItems = await getMenuItems(restaurantMatch.id);
+        const itemMatch = menuItems.find(item => 
+          lowerMessage.includes(item.name.toLowerCase())
+        );
+        
+        if (itemMatch && userId) {
+          // Create order in Supabase
+          try {
+            const orderData = {
+              user_email: userId,
+              restaurant_name: restaurantMatch.name,
+              item_name: itemMatch.name,
+              price: itemMatch.price,
+              quantity: 1,
+              status: 'pending'
+            };
+            
+            const order = await createOrder(orderData);
+            supabaseAction = {
+              type: 'order_created',
+              order: order,
+              message: `Zamówiłem ${itemMatch.name} z ${restaurantMatch.name} za ${itemMatch.price} zł.`
+            };
+            
+            console.log('✅ Order created via Supabase:', order);
+          } catch (error) {
+            console.error('❌ Error creating order:', error);
+          }
+        }
+      }
+    } else if (lowerMessage.includes('status') || lowerMessage.includes('zamówienie') || lowerMessage.includes('zamowienie')) {
+      action = "order_status";
+      
+      if (userId) {
+        const orders = await getUserOrders(userId);
+        if (orders.length > 0) {
+          const latestOrder = orders[0];
+          supabaseAction = {
+            type: 'order_status',
+            orders: orders,
+            message: `Twoje ostatnie zamówienie: ${latestOrder.item_name} z ${latestOrder.restaurant_name} - status: ${latestOrder.status}`
+          };
+        }
+      }
     } else if (lowerResponse.includes('taxi') || lowerResponse.includes('taksówka')) {
       action = "taxi_booking";
     } else if (lowerResponse.includes('hotel') || lowerResponse.includes('nocleg')) {
       action = "hotel_booking";
-    } else if (lowerResponse.includes('status') || lowerResponse.includes('zamówienie')) {
-      action = "order_status";
     }
     
     return {
-      text: responseText,
+      text: supabaseAction ? supabaseAction.message : responseText,
       action: action,
-      confidence: confidence
+      confidence: confidence,
+      supabaseAction: supabaseAction
     };
     
   } catch (error) {
@@ -196,8 +344,8 @@ export default async function agent(req, res) {
       context: context || 'brak'
     });
 
-    // Generate agent response using OpenAI
-    const agentResponse = await generateAgentResponse(message, context);
+    // Generate agent response using OpenAI with Supabase
+    const agentResponse = await generateAgentResponse(message, context, userId);
     
     console.log('🤖 Agent response:', agentResponse);
 
@@ -213,7 +361,8 @@ export default async function agent(req, res) {
       agentResponse: {
         text: agentResponse.text,
         action: agentResponse.action,
-        confidence: agentResponse.confidence
+        confidence: agentResponse.confidence,
+        supabaseAction: agentResponse.supabaseAction
       },
       audioContent: audioContent,
       audioEncoding: 'MP3'
