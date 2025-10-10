@@ -1,7 +1,5 @@
 import { SpeechClient } from '@google-cloud/speech';
 import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
 
 // Initialize Speech client
 let speechClient;
@@ -20,8 +18,10 @@ function initializeSpeechClient() {
       const credentials = JSON.parse(credentialsJson);
       speechClient = new SpeechClient({ credentials });
     } else {
-      console.log('⚠️ STT: Trying default Google Cloud credentials...');
-      speechClient = new SpeechClient();
+      console.log('✅ STT: Using local service account file...');
+      speechClient = new SpeechClient({
+        keyFilename: './service-account.json'
+      });
     }
   } catch (error) {
     console.error('❌ STT: Failed to initialize client:', error);
@@ -31,9 +31,9 @@ function initializeSpeechClient() {
   return speechClient;
 }
 
-// Configure multer for file uploads
+// Configure multer for file uploads (memory storage for Vercel)
 const upload = multer({
-  dest: 'uploads/',
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
@@ -51,17 +51,7 @@ const upload = multer({
   }
 });
 
-// Clean up uploaded files
-function cleanupFile(filePath) {
-  try {
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-      console.log('🗑️ Cleaned up file:', filePath);
-    }
-  } catch (error) {
-    console.error('❌ Error cleaning up file:', error);
-  }
-}
+// No file cleanup needed with memory storage
 
 export default async function stt(req, res) {
   // Set CORS headers
@@ -107,73 +97,57 @@ export default async function stt(req, res) {
       size: uploadedFile.size
     });
 
-    // Read audio file
-    const audioBuffer = fs.readFileSync(uploadedFile.path);
-    const audioBytes = audioBuffer.toString('base64');
-
-    // Initialize Speech client
-    const client = initializeSpeechClient();
+    // --- 🔊 GOOGLE SPEECH TO TEXT INTEGRATION ---
+    const speechClient = initializeSpeechClient();
 
     // Determine audio encoding based on file type
-    let encoding = 'WEBM_OPUS';
+    let detectedEncoding = 'WEBM_OPUS';
     if (uploadedFile.mimetype.includes('wav')) {
-      encoding = 'LINEAR16';
+      detectedEncoding = 'LINEAR16';
     } else if (uploadedFile.mimetype.includes('mp3')) {
-      encoding = 'MP3';
+      detectedEncoding = 'MP3';
     } else if (uploadedFile.mimetype.includes('flac')) {
-      encoding = 'FLAC';
+      detectedEncoding = 'FLAC';
     }
 
-    console.log('🎵 Audio encoding:', encoding);
+    const audioBytes = uploadedFile.buffer.toString("base64");
 
-    // Configure recognition request
     const request = {
-      audio: {
-        content: audioBytes,
-      },
+      audio: { content: audioBytes },
       config: {
-        encoding: encoding,
-        languageCode: 'pl-PL',
-        model: 'default',
-        enableAutomaticPunctuation: true,
-        enableWordTimeOffsets: false,
+        encoding: detectedEncoding || "WEBM_OPUS",
         sampleRateHertz: 16000,
-        alternativeLanguageCodes: ['en-US'],
+        languageCode: "pl-PL",
+        enableAutomaticPunctuation: true,
+        model: "default",
       },
     };
 
-    console.log('🔄 Sending to Google Cloud Speech-to-Text...');
-    
-    // Perform speech recognition
-    const [response] = await client.recognize(request);
-    
-    if (!response.results || response.results.length === 0) {
+    console.log("🎙 Sending audio to Google Cloud STT...");
+
+    const [response] = await speechClient.recognize(request);
+    const transcription = response.results
+      .map(result => result.alternatives[0].transcript)
+      .join(" ");
+
+    if (!transcription) {
       return res.status(200).json({
-        ok: true,
-        text: '',
-        confidence: 0,
-        message: 'No speech detected in audio'
+        ok: false,
+        error: "NO_SPEECH",
+        message: "Nie wykryto mowy w nagraniu.",
       });
     }
 
-    // Extract transcription and confidence
-    const result = response.results[0];
-    const transcription = result.alternatives[0].transcript;
-    const confidence = result.alternatives[0].confidence || 0;
+    console.log("✅ Transkrypcja:", transcription);
 
-    console.log('✅ STT completed:', {
-      text: transcription.substring(0, 100) + '...',
-      confidence: confidence
-    });
-
-    res.status(200).json({
+    return res.status(200).json({
       ok: true,
       text: transcription,
-      confidence: confidence,
-      language: 'pl-PL',
-      encoding: encoding,
-      duration: uploadedFile.size / 16000 // Rough estimate
+      confidence: response.results[0].alternatives[0].confidence || null,
+      language: "pl-PL",
+      encoding: detectedEncoding,
     });
+    // --- 🔚 END STT PATCH ---
 
   } catch (error) {
     console.error('❌ STT error:', error);
@@ -199,9 +173,6 @@ export default async function stt(req, res) {
 
     res.status(500).json(errorResponse);
   } finally {
-    // Clean up uploaded file
-    if (uploadedFile && uploadedFile.path) {
-      cleanupFile(uploadedFile.path);
-    }
+    // No cleanup needed with memory storage
   }
 }

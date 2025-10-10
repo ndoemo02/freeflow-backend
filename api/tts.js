@@ -18,9 +18,10 @@ function initializeTtsClient() {
       const credentials = JSON.parse(credentialsJson);
       ttsClient = new TextToSpeechClient({ credentials });
     } else {
-      console.log('⚠️ TTS: Trying default Google Cloud credentials...');
-      ttsClient = new TextToSpeechClient();
-      console.log('✅ TTS: Using default Google Cloud credentials');
+      console.log('✅ TTS: Using local service account file...');
+      ttsClient = new TextToSpeechClient({
+        keyFilename: './service-account.json'
+      });
     }
   } catch (error) {
     console.error('❌ TTS: Failed to initialize client:', error);

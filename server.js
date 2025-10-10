@@ -21,24 +21,63 @@ let openai, sttClient, ttsClient;
 
 const initClients = () => {
   if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    sttClient = new speech.SpeechClient();
-    ttsClient = new textToSpeech.TextToSpeechClient();
+    // Use local service account file
+    const credentialsPath = './service-account.json';
+    
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
+    sttClient = new speech.SpeechClient({
+      keyFilename: credentialsPath
+    });
+    ttsClient = new textToSpeech.TextToSpeechClient({
+      keyFilename: credentialsPath
+    });
   }
 };
 
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Use test flow router
 app.use("/api", testFlowRouter);
+
+// Add direct STT endpoint for frontend proxy
+app.post("/api/stt", upload.single("audio"), async (req, res) => {
+  initClients();
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "No audio file provided" });
+    }
+
+    const audioBytes = req.file.buffer.toString("base64");
+
+    const [response] = await sttClient.recognize({
+      audio: { content: audioBytes },
+      config: {
+        encoding: "WEBM_OPUS",
+        languageCode: "pl-PL",
+        model: "default",
+      },
+    });
+
+    const transcription = response.results.map(r => r.alternatives[0].transcript).join("\n");
+    console.log("🎙️ API STT Transkrypcja:", transcription);
+    res.json({ ok: true, text: transcription });
+  } catch (err) {
+    console.error("❌ API STT Błąd:", err);
+    res.status(500).json({ ok: false, error: "Błąd transkrypcji głosu" });
+  }
+});
 
 // === [1] SPEECH → TEXT ===
 app.post("/stt", upload.single("audio"), async (req, res) => {
   initClients();
   
   try {
-    const file = fs.readFileSync(req.file.path);
-    const audioBytes = file.toString("base64");
+    if (!req.file) {
+      return res.status(400).json({ error: "No audio file provided" });
+    }
+
+    const audioBytes = req.file.buffer.toString("base64");
 
     const [response] = await sttClient.recognize({
       audio: { content: audioBytes },

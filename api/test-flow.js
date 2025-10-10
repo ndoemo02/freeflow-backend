@@ -1,11 +1,13 @@
 import express from "express";
 import multer from "multer";
-import fs from "fs";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
 
 const router = express.Router();
-const upload = multer({ dest: "uploads/" });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
+});
 
 // Initialize clients inside functions to ensure env vars are loaded
 let openai, sttClient, ttsClient;
@@ -14,8 +16,12 @@ const initClients = () => {
   if (!openai) {
     const OpenAI = require('openai').default;
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    sttClient = new speech.SpeechClient();
-    ttsClient = new textToSpeech.TextToSpeechClient();
+    sttClient = new speech.SpeechClient({
+      keyFilename: './service-account.json'
+    });
+    ttsClient = new textToSpeech.TextToSpeechClient({
+      keyFilename: './service-account.json'
+    });
   }
 };
 
@@ -39,8 +45,7 @@ router.post("/test-flow", upload.single("audio"), async (req, res) => {
         throw new Error('No audio file provided');
       }
 
-      const file = fs.readFileSync(req.file.path);
-      const audioBytes = file.toString("base64");
+      const audioBytes = req.file.buffer.toString("base64");
 
       const [sttResponse] = await sttClient.recognize({
         audio: { content: audioBytes },
@@ -151,13 +156,7 @@ router.post("/test-flow", upload.single("audio"), async (req, res) => {
     }
 
     // Clean up uploaded file
-    if (req.file && req.file.path) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (cleanupError) {
-        console.error('Error cleaning up file:', cleanupError);
-      }
-    }
+    // No cleanup needed with memory storage
 
     if (testResults.overall === 'FAIL') {
       res.status(500).json({
@@ -193,8 +192,7 @@ router.post("/test-stt", upload.single("audio"), async (req, res) => {
       return res.status(400).json({ error: 'No audio file provided' });
     }
 
-    const file = fs.readFileSync(req.file.path);
-    const audioBytes = file.toString("base64");
+    const audioBytes = req.file.buffer.toString("base64");
 
     const [response] = await sttClient.recognize({
       audio: { content: audioBytes },
@@ -208,7 +206,7 @@ router.post("/test-stt", upload.single("audio"), async (req, res) => {
     const transcription = response.results.map(r => r.alternatives[0].transcript).join("\n");
     
     // Clean up
-    fs.unlinkSync(req.file.path);
+    // No cleanup needed with memory storage
     
     res.json({
       ok: true,
