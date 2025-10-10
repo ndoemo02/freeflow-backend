@@ -16,19 +16,38 @@ const app = express();
 
 // CORS configuration
 app.use(cors({
-  origin: '*',
+  origin: [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: false,
+  optionsSuccessStatus: 200
 }));
 
 app.use(express.json());
 
 // Handle preflight requests for all routes
 app.options('*', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Max-Age', '86400');
   res.status(200).end();
 });
 
@@ -88,9 +107,20 @@ app.post("/api/tts", async (req, res) => {
 
 // FreeFlow Brain endpoint (before test-flow router)
 app.post("/api/freeflow-brain", async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
@@ -160,9 +190,20 @@ app.post("/api/freeflow-brain", async (req, res) => {
 // FreeFlow Brain endpoint
 app.post("/api/brain", async (req, res) => {
   // Set CORS headers first
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
   
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
