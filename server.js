@@ -243,20 +243,83 @@ app.post("/api/brain", async (req, res) => {
 
     console.log("🧠 FreeFlow Brain processing:", { text, sessionId, userId });
 
-    // Smart conversation logic
+    // Initialize Supabase client
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
+    // Smart conversation logic with real data
     let reply = "Nie do końca rozumiem, możesz powtórzyć?";
     
-    // Pizza logic
+    // Pizza logic - get real pizza menu
     if (text.match(/pizza|margherita|pepperoni|capricciosa/i)) {
-      reply = "Mam dziś promocję na pizzę! Margherita 25zł, Pepperoni 28zł. Którą wybierasz?";
+      const { data: pizzaItems } = await supabase
+        .from('menu_items')
+        .select('name, price_cents, category')
+        .eq('category', 'pizza')
+        .eq('available', true)
+        .limit(3);
+      
+      if (pizzaItems && pizzaItems.length > 0) {
+        const pizzaList = pizzaItems.map(item => 
+          `${item.name} ${(item.price_cents / 100).toFixed(0)}zł`
+        ).join(', ');
+        reply = `Mam dziś pizze: ${pizzaList}. Którą wybierasz?`;
+      } else {
+        reply = "Przepraszam, nie mam dziś pizzy w ofercie.";
+      }
     }
-    // Burger logic
+    // Burger logic - get real burger menu
     else if (text.match(/burger|hamburger|cheeseburger/i)) {
-      reply = "Burger Classic z sosem freeflow, polecam! Z frytkami i colą 32zł.";
+      const { data: burgerItems } = await supabase
+        .from('menu_items')
+        .select('name, price_cents, category')
+        .eq('category', 'burger')
+        .eq('available', true)
+        .limit(3);
+      
+      if (burgerItems && burgerItems.length > 0) {
+        const burgerList = burgerItems.map(item => 
+          `${item.name} ${(item.price_cents / 100).toFixed(0)}zł`
+        ).join(', ');
+        reply = `Mam burgery: ${burgerList}. Który wybierasz?`;
+      } else {
+        reply = "Przepraszam, nie mam dziś burgerów w ofercie.";
+      }
     }
-    // Kebab logic
+    // Kebab logic - get real kebab menu
     else if (text.match(/kebab|kebap|döner/i)) {
-      reply = "Kebab z baraniny, świeży, pachnący czosnkiem 😎 Z sałatką 18zł.";
+      const { data: kebabItems } = await supabase
+        .from('menu_items')
+        .select('name, price_cents, category')
+        .eq('category', 'kebab')
+        .eq('available', true)
+        .limit(3);
+      
+      if (kebabItems && kebabItems.length > 0) {
+        const kebabList = kebabItems.map(item => 
+          `${item.name} ${(item.price_cents / 100).toFixed(0)}zł`
+        ).join(', ');
+        reply = `Mam kebaby: ${kebabList}. Który wybierasz?`;
+      } else {
+        reply = "Przepraszam, nie mam dziś kebabów w ofercie.";
+      }
+    }
+    // Restaurant list logic
+    else if (text.match(/restauracja|knajpa|gdzie|lista/i)) {
+      const { data: restaurants } = await supabase
+        .from('restaurants')
+        .select('name, city, category')
+        .limit(5);
+      
+      if (restaurants && restaurants.length > 0) {
+        const restaurantList = restaurants.map(r => r.name).join(', ');
+        reply = `Mam dostępne restauracje: ${restaurantList}. Z której chcesz zamówić?`;
+      } else {
+        reply = "Przepraszam, nie mam dostępnych restauracji.";
+      }
     }
     // Taxi logic
     else if (text.match(/taxi|taksówka|przejazd|dowóz/i)) {
@@ -598,6 +661,66 @@ app.get("/api/realtime-token", async (req, res) => {
     res.status(200).json({ apiKey });
   } catch (err) {
     console.error("❌ Błąd realtime-token:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === [5] RESTAURANTS ENDPOINT ===
+app.get("/api/restaurants", async (req, res) => {
+  try {
+    // Initialize Supabase client
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
+    const { data: restaurants, error } = await supabase
+      .from('restaurants')
+      .select('*')
+      .order('name');
+
+    if (error) {
+      console.error("❌ Błąd pobierania restauracji:", error);
+      return res.status(500).json({ error: "Błąd pobierania restauracji" });
+    }
+
+    console.log(`🍽️ Pobrano ${restaurants?.length || 0} restauracji`);
+    res.json({ restaurants: restaurants || [] });
+  } catch (err) {
+    console.error("❌ Błąd restaurants endpoint:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// === [6] MENU ENDPOINT ===
+app.get("/api/menu/:restaurantId", async (req, res) => {
+  try {
+    const { restaurantId } = req.params;
+    
+    // Initialize Supabase client
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
+
+    const { data: menuItems, error } = await supabase
+      .from('menu_items')
+      .select('*')
+      .eq('restaurant_id', restaurantId)
+      .eq('available', true)
+      .order('category, name');
+
+    if (error) {
+      console.error("❌ Błąd pobierania menu:", error);
+      return res.status(500).json({ error: "Błąd pobierania menu" });
+    }
+
+    console.log(`🍕 Pobrano ${menuItems?.length || 0} pozycji menu dla restauracji ${restaurantId}`);
+    res.json({ menuItems: menuItems || [] });
+  } catch (err) {
+    console.error("❌ Błąd menu endpoint:", err);
     res.status(500).json({ error: err.message });
   }
 });
