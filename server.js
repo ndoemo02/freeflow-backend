@@ -38,8 +38,8 @@ let openai, sttClient, ttsClient;
 
 const initClients = () => {
   if (!openai) {
-    // Use local service account file
-    const credentialsPath = './service-account.json';
+    // Use credentials from environment variable or fallback to freeflow.json
+    const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './freeflow.json';
     
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
     sttClient = new speech.SpeechClient({
