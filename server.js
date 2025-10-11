@@ -44,6 +44,12 @@ const initClients = () => {
     if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
       // Vercel deployment - use JSON from environment variable
       const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+      
+      // Fix private key formatting (replace \n with actual newlines)
+      if (credentials.private_key) {
+        credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+      }
+      
       sttClient = new speech.SpeechClient({
         credentials: credentials
       });
