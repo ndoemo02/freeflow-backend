@@ -38,16 +38,28 @@ let openai, sttClient, ttsClient;
 
 const initClients = () => {
   if (!openai) {
-    // Use credentials from environment variable or fallback to freeflow.json
-    const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './freeflow.json';
-    
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
-    sttClient = new speech.SpeechClient({
-      keyFilename: credentialsPath
-    });
-    ttsClient = new textToSpeech.TextToSpeechClient({
-      keyFilename: credentialsPath
-    });
+    
+    // Use JSON credentials for Vercel, file path for local development
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      // Vercel deployment - use JSON from environment variable
+      const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+      sttClient = new speech.SpeechClient({
+        credentials: credentials
+      });
+      ttsClient = new textToSpeech.TextToSpeechClient({
+        credentials: credentials
+      });
+    } else {
+      // Local development - use file path
+      const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './FreeFlow.json';
+      sttClient = new speech.SpeechClient({
+        keyFilename: credentialsPath
+      });
+      ttsClient = new textToSpeech.TextToSpeechClient({
+        keyFilename: credentialsPath
+      });
+    }
   }
 };
 
