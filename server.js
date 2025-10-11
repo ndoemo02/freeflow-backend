@@ -40,9 +40,20 @@ const initClients = () => {
   if (!openai) {
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
     
-    // Use JSON credentials for Vercel, file path for local development
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      // Vercel deployment - use JSON from environment variable
+    // Use credentials for Vercel, file path for local development
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
+      // Vercel deployment - use base64 encoded JSON from environment variable
+      const credentialsJson = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf-8');
+      const credentials = JSON.parse(credentialsJson);
+      
+      sttClient = new speech.SpeechClient({
+        credentials: credentials
+      });
+      ttsClient = new textToSpeech.TextToSpeechClient({
+        credentials: credentials
+      });
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      // Fallback: Vercel deployment - use JSON from environment variable
       const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
       
       // Fix private key formatting (replace \n with actual newlines)
