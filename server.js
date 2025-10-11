@@ -579,8 +579,9 @@ app.post("/tts", async (req, res) => {
     });
 
     console.log("🔊 Wygenerowano TTS z Google Cloud");
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.send(response.audioContent);
+    res.json({ 
+      audioContent: response.audioContent.toString('base64')
+    });
   } catch (err) {
     console.error("❌ Błąd TTS:", err);
     res.status(500).json({ error: "Błąd generowania głosu" });
