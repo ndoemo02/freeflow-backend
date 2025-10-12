@@ -1,69 +1,72 @@
-import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
-import { getIntent } from "./intent-router.js";
-import { getMemory, setMemory } from "./memory.js";
+import dotenv from "dotenv";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+dotenv.config();
+
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://ezemaacyyvbpjlagchds.supabase.co',
-  process.env.SUPABASE_ANON_KEY || 'sb_publishable_-i5RiddgTH3Eh9-6xuJ7wQ_KjuredAu'
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-export default async function handler(req, res) {
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export default async function amberBrain(req, res) {
   try {
-    const { text, userId } = req.body;
-    const memory = await getMemory(userId);
-    const intent = await getIntent(text);
-    let menuText = "";
+    const { text, lat, lng } = req.body;
 
-    // 🍕 Jeśli użytkownik mówi o jedzeniu, sięgnij do bazy
-    if (intent === "food") {
-      const { data: restaurants } = await supabase
+    if (!text) return res.status(400).json({ error: "Missing text input" });
+
+    // 1️⃣ Jeśli mamy współrzędne, używamy ich do dopasowania najbliższych lokali
+    let nearby = [];
+    if (lat && lng) {
+      const { data, error } = await supabase
         .from("restaurants")
-        .select("id, name")
-        .ilike("name", `%${text}%`);
+        .select("id, name, address, lat, lng");
 
-      if (restaurants?.length) {
-        const { data: items } = await supabase
-          .from("menu_items")
-          .select("name, price_cents, description")
-          .eq("restaurant_id", restaurants[0].id);
+      if (error) throw error;
 
-        if (items?.length) {
-          menuText = `W ${restaurants[0].name} mamy:\n\n`;
-          items.forEach(item => {
-            const price = (item.price_cents / 100).toFixed(2);
-            menuText += `• ${item.name} — ${price} zł\n`;
-          });
-        }
-      }
+      nearby = data
+        .map((r) => ({
+          ...r,
+          distance_km: calculateDistance(lat, lng, r.lat, r.lng),
+        }))
+        .filter((r) => r.distance_km <= 3)
+        .sort((a, b) => a.distance_km - b.distance_km);
     }
 
-    // 🧠 Amber odpowiada na podstawie bazy lub kontekstu
-    const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
-You are Amber — the FreeFlow voice. Be warm and natural.
-If MENU data is available, refer to it gracefully.
-Keep it short (1-2 sentences), Polish only.`
-        },
-        { role: "user", content: `INTENT: ${intent}` },
-        { role: "user", content: `MEMORY: ${JSON.stringify(memory)}` },
-        { role: "user", content: `USER: ${text}` },
-        { role: "user", content: `MENU: ${menuText || "brak danych"}` }
-      ],
-      temperature: 0.8,
-      max_tokens: 100
-    });
+    // 2️⃣ Tworzymy logiczną odpowiedź
+    let reply = "Nie mam danych o restauracjach w pobliżu.";
+    if (nearby.length > 0) {
+      const lines = nearby
+        .slice(0, 5)
+        .map(
+          (r, i) =>
+            `${i + 1}. ${r.name} (${r.distance_km.toFixed(2)} km, ${r.address})`
+        )
+        .join("\n");
 
-    const reply = response.choices[0].message.content.trim();
-    await setMemory(userId, { lastReply: reply, intent });
-    res.json({ ok: true, reply, intent });
+      reply = `Oto restauracje w promieniu 3 kilometrów:\n${lines}\nKtórą chcesz wybrać?`;
+    }
+
+    console.log("🧠 Amber response:", reply);
+    res.json({
+      ok: true,
+      reply,
+      count: nearby.length,
+      timestamp: new Date().toISOString(),
+    });
   } catch (err) {
-    console.error("❌ Amber+Supabase error:", err);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("Amber brain error:", err);
+    res.status(500).json({ error: "Server error", details: err.message });
   }
 }

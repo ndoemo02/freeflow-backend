@@ -75,6 +75,7 @@ console.log("✅ FreeFlow Watchdog initialized successfully.\n");
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
+import amberBrain from "./api/brain/amber.js";
 
 import OpenAI from "openai";
 import multer from "multer";
@@ -209,32 +210,8 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-// FreeFlow Brain endpoint with GPT-4o-mini
-app.post("/api/brain", async (req, res) => {
-  // Set CORS headers first
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-  
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // Import and use the brain handler
-  const brainHandler = await import('./api/brain.js');
-  return brainHandler.default(req, res);
-});
+// FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
+app.post("/api/brain", amberBrain);
 
 // Debug Session endpoint
 app.get("/api/debug-session", async (req, res) => {
