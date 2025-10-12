@@ -74,6 +74,7 @@ console.log("──────────────────────�
 console.log("✅ FreeFlow Watchdog initialized successfully.\n");
 
 import express from "express";
+import { createClient } from "@supabase/supabase-js";
 
 import OpenAI from "openai";
 import multer from "multer";
@@ -806,8 +807,53 @@ app.get("/api/user-orders", async (req, res) => {
 });
 
 // 🔧 Health check – działa pod /api/health
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
+app.get("/api/health", async (req, res) => {
+  const start = Date.now();
+
+  const health = {
+    ok: true,
+    service: "FreeFlow Voice Expert",
+    version: process.env.npm_package_version || "unknown",
+    node: process.version,
+    timestamp: new Date().toISOString(),
+    supabase: { ok: false, time: null },
+    tts: { ok: false, time: null },
+    openai: !!process.env.OPENAI_API_KEY,
+  };
+
+  try {
+    // 🔹 Supabase check
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+    const t0 = performance.now();
+    const { data, error } = await supabase.from("restaurants").select("id").limit(1);
+    const t1 = performance.now();
+
+    if (error) throw error;
+    health.supabase.ok = true;
+    health.supabase.time = `${(t1 - t0).toFixed(1)} ms`;
+  } catch (err) {
+    health.ok = false;
+    health.supabase.error = err.message;
+  }
+
+  try {
+    // 🔹 TTS check (Google key)
+    const t0 = performance.now();
+    if (process.env.GOOGLE_TTS_API_KEY) {
+      health.tts.ok = true;
+    }
+    const t1 = performance.now();
+    health.tts.time = `${(t1 - t0).toFixed(1)} ms`;
+  } catch (err) {
+    health.ok = false;
+    health.tts.error = err.message;
+  }
+
+  health.responseTime = `${Date.now() - start} ms`;
+  res.json(health);
 });
 
 const PORT = process.env.PORT || 3000;
