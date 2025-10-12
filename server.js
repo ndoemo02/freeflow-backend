@@ -18,16 +18,36 @@ if (fs.existsSync(envPath)) {
 
 // ✅ --- FreeFlow Startup Watchdog ---
 import os from "os";
+import { execSync } from "child_process";
 
-console.log("🧠 Initializing FreeFlow Watchdog...");
-console.log("🧩 Environment summary:");
+// 🔹 Wczytaj wersję z package.json
+let version = "unknown";
+try {
+  const pkg = JSON.parse(fs.readFileSync("./package.json", "utf8"));
+  version = pkg.version || "unversioned";
+} catch (err) {
+  version = "missing package.json";
+}
+
+// 🔹 Pobierz ostatni commit z Git (jeśli istnieje repo)
+let gitInfo = "no git data";
+try {
+  gitInfo = execSync("git log -1 --pretty=format:\"%h - %s (%ci)\"").toString().trim();
+} catch {
+  gitInfo = "git not initialized";
+}
+
+// 🔹 System info
+console.log("\n🧠 Initializing FreeFlow Watchdog...");
 console.log("──────────────────────────────────────────────");
+console.log(`📦 Version: ${version}`);
+console.log(`💾 Git: ${gitInfo}`);
 console.log(`📦 Node: ${process.version}`);
 console.log(`💻 Host: ${os.hostname()}`);
-console.log(`📂 CWD: ${process.cwd()}`);
+console.log(`📂 Working dir: ${process.cwd()}`);
 console.log("──────────────────────────────────────────────");
 
-// 🔍 ENV check
+// 🔹 Sprawdzenie ENV
 const env = {
   SUPABASE_URL: process.env.SUPABASE_URL || "❌ missing",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ loaded" : "❌ missing",
@@ -37,9 +57,9 @@ const env = {
 };
 
 console.log("🌍 ENV CHECK:");
-console.log(env);
+console.table(env);
 
-// 🧠 sanity log
+// 🔹 Ostrzeżenia
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
   console.warn("🚨 Supabase credentials missing — backend may fail to fetch restaurants!");
 }
