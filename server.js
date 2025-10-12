@@ -606,6 +606,57 @@ app.get("/api/restaurants", async (req, res) => {
   }
 });
 
+// === [5.1] RESTAURANTS NEARBY ENDPOINT ===
+app.get("/api/restaurants/nearby", async (req, res) => {
+  try {
+    const { lat, lng, radius = 2 } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: "Missing lat/lng parameters" });
+    }
+
+    const { supabase } = await import('./lib/supabaseClient.js');
+    console.log(`🔍 Finding restaurants near ${lat}, ${lng} within ${radius}km...`);
+
+    const { data: restaurants, error } = await supabase
+      .from("restaurants")
+      .select("id, name, address, lat, lng");
+
+    if (error) {
+      console.error("❌ Supabase query error:", error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    // Funkcja licząca dystans między punktami (Haversine formula)
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371; // promień Ziemi w km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) *
+        Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    const nearby = restaurants
+      .map((r) => ({
+        ...r,
+        distance_km: r.lat && r.lng ? calculateDistance(lat, lng, r.lat, r.lng) : null,
+      }))
+      .filter((r) => r.distance_km !== null && r.distance_km <= radius)
+      .sort((a, b) => a.distance_km - b.distance_km);
+
+    console.log(`✅ Found ${nearby.length} restaurants within ${radius}km`);
+    res.json({ nearby });
+  } catch (err) {
+    console.error("🔥 API /restaurants/nearby fatal error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // === [6] MENU ENDPOINT ===
 app.get("/api/menu/:restaurantId", async (req, res) => {
   try {
