@@ -1,10 +1,6 @@
 ﻿
-
+import 'dotenv/config';
 import express from "express";
-import dotenv from "dotenv";
-
-// Load environment variables first
-dotenv.config();
 
 console.log("🌍 ENV CHECK:", {
   SUPABASE_URL: process.env.SUPABASE_URL,
