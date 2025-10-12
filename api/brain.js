@@ -7,33 +7,40 @@ const openai = new OpenAI({
 
 export default async function handler(req, res) {
   try {
-    const { text, userId } = req.body;
+    const { text, userId } = req.body || {};
     if (!text) return res.status(400).json({ error: "Missing text" });
 
-    // === 🔄 RESET KONTEKSTU ===
+    // ✅ Log startowy
+    console.log("🧠 Brain received:", text);
+
+    // === RESET SESJI ===
     const isNewQuery = /gdzie|co|jaka|które|blisko|pobliskie|chciałbym/i.test(text);
     const sessionId = isNewQuery ? `session_${Date.now()}` : "default";
 
-    // === 🍽️ ROZPOZNANIE RESTAURACJI Z BAZY ===
-    const { data: restaurants } = await supabase.from("restaurants").select("id, name");
-    let foundRestaurant = null;
+    // === POBIERZ RESTAURACJE ===
+    const { data: restaurants, error: dbError } = await supabase
+      .from("restaurants")
+      .select("id, name");
 
+    if (dbError) {
+      console.error("❌ Supabase error:", dbError.message);
+      return res.status(500).json({ error: "Błąd połączenia z bazą" });
+    }
+
+    let foundRestaurant = null;
     if (restaurants && restaurants.length > 0) {
       foundRestaurant = restaurants.find(r =>
         text.toLowerCase().includes(r.name.toLowerCase())
       );
     }
 
-    const restaurantContext = foundRestaurant
-      ? foundRestaurant.name
-      : "Monte Carlo";
-
+    const restaurantContext = foundRestaurant ? foundRestaurant.name : "Monte Carlo";
     console.log("🧭 Active restaurant context:", restaurantContext);
 
-    // === 💬 OPENAI RESPONSE ===
+    // === OPENAI ===
     const systemPrompt = `
-      Jesteś Amber — asystentką FreeFlow. 
-      Jeśli użytkownik mówi nazwę restauracji, przełącz kontekst.
+      Jesteś Amber — asystentką FreeFlow.
+      Jeśli użytkownik wspomina nazwę restauracji, przełącz kontekst.
       Jeśli nie mówi żadnej nazwy, zaproponuj kilka z listy.
       Aktualna restauracja: ${restaurantContext}.
     `;
@@ -48,8 +55,7 @@ export default async function handler(req, res) {
       max_tokens: 150
     });
 
-    const reply = completion.choices[0].message.content;
-
+    const reply = completion?.choices?.[0]?.message?.content || "Nie mogę teraz odpowiedzieć.";
     res.json({
       ok: true,
       reply,
@@ -57,8 +63,9 @@ export default async function handler(req, res) {
       sessionId,
       timestamp: new Date().toISOString()
     });
+
   } catch (error) {
-    console.error("❌ Brain error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("❌ Brain fatal error:", error);
+    res.status(500).json({ error: error.message || "Błąd serwera Brain" });
   }
 }
