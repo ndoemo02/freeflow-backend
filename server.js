@@ -16,12 +16,44 @@ if (fs.existsSync(envPath)) {
   console.warn("⚠️  No .env file found at:", envPath);
 }
 
-import express from "express";
+// ✅ --- FreeFlow Startup Watchdog ---
+import os from "os";
 
-console.log("🌍 ENV CHECK:", {
-  SUPABASE_URL: process.env.SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ LOADED" : "❌ MISSING",
-});
+console.log("🧠 Initializing FreeFlow Watchdog...");
+console.log("🧩 Environment summary:");
+console.log("──────────────────────────────────────────────");
+console.log(`📦 Node: ${process.version}`);
+console.log(`💻 Host: ${os.hostname()}`);
+console.log(`📂 CWD: ${process.cwd()}`);
+console.log("──────────────────────────────────────────────");
+
+// 🔍 ENV check
+const env = {
+  SUPABASE_URL: process.env.SUPABASE_URL || "❌ missing",
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ loaded" : "❌ missing",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY ? "✅ loaded" : "⚠️ missing",
+  GOOGLE_TTS_API_KEY: process.env.GOOGLE_TTS_API_KEY ? "✅ loaded" : "⚠️ missing",
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY ? "✅ loaded" : "⚠️ missing",
+};
+
+console.log("🌍 ENV CHECK:");
+console.log(env);
+
+// 🧠 sanity log
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn("🚨 Supabase credentials missing — backend may fail to fetch restaurants!");
+}
+if (!process.env.OPENAI_API_KEY) {
+  console.warn("⚠️ OpenAI key not found — AI brain responses may be disabled!");
+}
+if (!process.env.GOOGLE_TTS_API_KEY) {
+  console.warn("⚠️ TTS key missing — voice output will not work!");
+}
+
+console.log("──────────────────────────────────────────────");
+console.log("✅ FreeFlow Watchdog initialized successfully.\n");
+
+import express from "express";
 
 import OpenAI from "openai";
 import multer from "multer";
