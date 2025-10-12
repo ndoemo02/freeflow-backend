@@ -1,15 +1,10 @@
-﻿
+﻿console.log("Loaded ENV:", process.env.OPENAI_API_KEY ? "✅ OK" : "❌ Missing key");
 
 import express from "express";
 import dotenv from "dotenv";
 
 // Load environment variables first
 dotenv.config();
-
-console.log("🌍 ENV CHECK:", {
-  SUPABASE_URL: process.env.SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? "✅ LOADED" : "❌ MISSING",
-});
 
 import OpenAI from "openai";
 import multer from "multer";
@@ -18,6 +13,8 @@ import cors from "cors";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
 import testFlowRouter from "./api/test-flow.js";
+import ttsRouter from "./api/tts.js";
+
 
 const app = express();
 
@@ -37,75 +34,44 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use("/api/tts", ttsRouter);
 
-// kompatybilność: GET /api?endpoint=health oraz POST /api { endpoint: "health" }
-app.all('/api', (req, res, next) => {
-  const ep = (req.query.endpoint || req.body?.endpoint || '').toString();
 
-  if (ep === 'health') {
-    return res.json({ ok: true, ts: new Date().toISOString() });
+// Handle preflight requests for all routes
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
   }
-
-  return res.status(404).send('Unknown /api endpoint');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(200).end();
 });
-
-// CORS is handled by the cors middleware above
 
 // Initialize clients inside functions to ensure env vars are loaded
 let openai, sttClient, ttsClient;
 
 const initClients = () => {
   if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
+    // Use local service account file
+    const credentialsPath = './service-account.json';
     
-    // Use credentials for Vercel, file path for local development
-    if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
-      // Vercel deployment - use base64 encoded JSON from environment variable
-      const credentialsJson = Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf-8');
-      const credentials = JSON.parse(credentialsJson);
-      
-      sttClient = new speech.SpeechClient({
-        credentials: credentials
-      });
-      ttsClient = new textToSpeech.TextToSpeechClient({
-        credentials: credentials
-      });
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
-      // Fallback: Vercel deployment - use base64 encoded JSON from environment variable
-      const credentialsJson = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf-8');
-      const credentials = JSON.parse(credentialsJson);
-      
-      sttClient = new speech.SpeechClient({
-        credentials: credentials
-      });
-      ttsClient = new textToSpeech.TextToSpeechClient({
-        credentials: credentials
-      });
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      // Fallback: Vercel deployment - use JSON from environment variable
-      const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-      
-      // Fix private key formatting (replace \n with actual newlines)
-      if (credentials.private_key) {
-        credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
-      }
-      
-      sttClient = new speech.SpeechClient({
-        credentials: credentials
-      });
-      ttsClient = new textToSpeech.TextToSpeechClient({
-        credentials: credentials
-      });
-    } else {
-      // Local development - use file path
-      const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './FreeFlow.json';
-      sttClient = new speech.SpeechClient({
-        keyFilename: credentialsPath
-      });
-      ttsClient = new textToSpeech.TextToSpeechClient({
-        keyFilename: credentialsPath
-      });
-    }
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || 'dummy-key' });
+    sttClient = new speech.SpeechClient({
+      keyFilename: credentialsPath
+    });
+    ttsClient = new textToSpeech.TextToSpeechClient({
+      keyFilename: credentialsPath
+    });
   }
 };
 
@@ -145,7 +111,89 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
-// FreeFlow Brain endpoint with GPT-4o-mini
+// FreeFlow Brain endpoint (before test-flow router)
+app.post("/api/freeflow-brain", async (req, res) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://freeflow-frontend-seven.vercel.app',
+    'https://freeflow-frontend.vercel.app', 
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ];
+  
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  try {
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: "Missing text parameter" 
+      });
+    }
+
+    console.log("🧠 FreeFlow Brain processing:", text);
+
+    // Na start - prosta logika zamiast DF
+    let reply = "Nie do końca rozumiem, możesz powtórzyć?";
+    
+    // Pizza logic
+    if (text.match(/pizza|margherita|pepperoni|capricciosa/i)) {
+      reply = "Mam dziś promocję na pizzę! Margherita 25zł, Pepperoni 28zł. Którą wybierasz?";
+    }
+    // Burger logic
+    else if (text.match(/burger|hamburger|cheeseburger/i)) {
+      reply = "Burger Classic z sosem freeflow, polecam! Z frytkami i colą 32zł.";
+    }
+    // Kebab logic
+    else if (text.match(/kebab|kebap|döner/i)) {
+      reply = "Kebab z baraniny, świeży, pachnący czosnkiem 😎 Z sałatką 18zł.";
+    }
+    // Taxi logic
+    else if (text.match(/taxi|taksówka|przejazd|dowóz/i)) {
+      reply = "Zamawiam taksówkę! Dokąd jedziemy? Podaj adres docelowy.";
+    }
+    // Hotel logic
+    else if (text.match(/hotel|nocleg|apartament|pokój/i)) {
+      reply = "Mam dostępne pokoje! Na ile nocy? Jaki standard preferujesz?";
+    }
+    // Greeting logic
+    else if (text.match(/cześć|witaj|dzień dobry|hej/i)) {
+      reply = "Cześć! Jestem FreeFlow - pomogę Ci zamówić jedzenie, taksówkę lub hotel. Co Cię interesuje?";
+    }
+    // Help logic
+    else if (text.match(/pomoc|help|co możesz|menu/i)) {
+      reply = "Mogę pomóc Ci z: 🍕 Jedzeniem, 🚕 Taksówką, 🏨 Hotelem. Powiedz co Cię interesuje!";
+    }
+    // Order logic
+    else if (text.match(/zamów|zamawiam|chcę|potrzebuję/i)) {
+      reply = "Świetnie! Co chcesz zamówić? Pizza, burger, kebab, taksówka czy hotel?";
+    }
+
+    console.log("🧠 FreeFlow Brain response:", reply);
+
+    return res.status(200).json({
+      ok: true,
+      response: reply,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ FreeFlow brain error:", err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err.message 
+    });
+  }
+});
+
+// FreeFlow Brain endpoint
 app.post("/api/brain", async (req, res) => {
   // Set CORS headers first
   const origin = req.headers.origin;
@@ -167,55 +215,70 @@ app.post("/api/brain", async (req, res) => {
     return res.status(200).end();
   }
 
-  // Import and use the brain handler
-  const brainHandler = await import('./api/brain.js');
-  return brainHandler.default(req, res);
-});
+  try {
+    const { text, sessionId, userId } = req.body;
 
-// Debug Session endpoint
-app.get("/api/debug-session", async (req, res) => {
-  // Set CORS headers
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+    if (!text) {
+      return res.status(400).json({ 
+        ok: false, 
+        error: "Missing text parameter" 
+      });
+    }
+
+    console.log("🧠 FreeFlow Brain processing:", { text, sessionId, userId });
+
+    // Smart conversation logic
+    let reply = "Nie do końca rozumiem, możesz powtórzyć?";
+    
+    // Pizza logic
+    if (text.match(/pizza|margherita|pepperoni|capricciosa/i)) {
+      reply = "Mam dziś promocję na pizzę! Margherita 25zł, Pepperoni 28zł. Którą wybierasz?";
+    }
+    // Burger logic
+    else if (text.match(/burger|hamburger|cheeseburger/i)) {
+      reply = "Burger Classic z sosem freeflow, polecam! Z frytkami i colą 32zł.";
+    }
+    // Kebab logic
+    else if (text.match(/kebab|kebap|döner/i)) {
+      reply = "Kebab z baraniny, świeży, pachnący czosnkiem 😎 Z sałatką 18zł.";
+    }
+    // Taxi logic
+    else if (text.match(/taxi|taksówka|przejazd|dowóz/i)) {
+      reply = "Zamawiam taksówkę! Dokąd jedziemy? Podaj adres docelowy.";
+    }
+    // Hotel logic
+    else if (text.match(/hotel|nocleg|apartament|pokój/i)) {
+      reply = "Mam dostępne pokoje! Na ile nocy? Jaki standard preferujesz?";
+    }
+    // Greeting logic
+    else if (text.match(/cześć|witaj|dzień dobry|hej/i)) {
+      reply = "Cześć! Jestem FreeFlow - pomogę Ci zamówić jedzenie, taksówkę lub hotel. Co Cię interesuje?";
+    }
+    // Help logic
+    else if (text.match(/pomoc|help|co możesz|menu/i)) {
+      reply = "Mogę pomóc Ci z: 🍕 Jedzeniem, 🚕 Taksówką, 🏨 Hotelem. Powiedz co Cię interesuje!";
+    }
+    // Order logic
+    else if (text.match(/zamów|zamawiam|chcę|potrzebuję/i)) {
+      reply = "Świetnie! Co chcesz zamówić? Pizza, burger, kebab, taksówka czy hotel?";
+    }
+
+    console.log("🧠 FreeFlow Brain response:", reply);
+
+    return res.status(200).json({
+      ok: true,
+      response: reply,
+      sessionId: sessionId || 'default',
+      userId: userId || 'anonymous',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ FreeFlow brain error:", err);
+    return res.status(500).json({ 
+      ok: false, 
+      error: err.message 
+    });
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-
-  // Import and use the debug handler
-  const debugHandler = await import('./api/debug-session.js');
-  return debugHandler.default(req, res);
-});
-
-// Debug Reset endpoint
-app.get("/api/debug-reset", async (req, res) => {
-  // Set CORS headers
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-
-  // Import and use the reset handler
-  const resetHandler = await import('./api/debug-reset.js');
-  return resetHandler.default(req, res);
 });
 
 // Sessions API endpoint
@@ -230,7 +293,11 @@ app.post("/api/sessions", async (req, res) => {
     const { action, sessionId, userId, message, eventType, data } = req.body;
 
     // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_ANON_KEY
+    );
 
     switch (action) {
       case 'create_session':
@@ -496,9 +563,8 @@ app.post("/tts", async (req, res) => {
     });
 
     console.log("🔊 Wygenerowano TTS z Google Cloud");
-    res.json({ 
-      audioContent: response.audioContent.toString('base64')
-    });
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(response.audioContent);
   } catch (err) {
     console.error("❌ Błąd TTS:", err);
     res.status(500).json({ error: "Błąd generowania głosu" });
@@ -517,234 +583,6 @@ app.get("/api/realtime-token", async (req, res) => {
     console.error("❌ Błąd realtime-token:", err);
     res.status(500).json({ error: err.message });
   }
-});
-
-// === [5] RESTAURANTS ENDPOINT ===
-app.get("/api/restaurants", async (req, res) => {
-  try {
-    const { supabase } = await import('./lib/supabaseClient.js');
-    console.log("🔍 Fetching restaurants...");
-
-    const { data, error } = await supabase
-      .from("restaurants")
-      .select("id, name, address");
-
-    if (error) {
-      console.error("❌ Supabase query error:", error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    console.log(`✅ Fetched ${data.length} restaurants`);
-    res.json({ restaurants: data });
-  } catch (err) {
-    console.error("🔥 API /restaurants fatal error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// === [6] MENU ENDPOINT ===
-app.get("/api/menu/:restaurantId", async (req, res) => {
-  try {
-    const { restaurantId } = req.params;
-    
-    // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
-
-    const { data: menuItems, error } = await supabase
-      .from('menu_items')
-      .select('*')
-      .eq('restaurant_id', restaurantId)
-      .eq('available', true)
-      .order('category, name');
-
-    if (error) {
-      console.error("❌ Błąd pobierania menu:", error);
-      return res.status(500).json({ error: "Błąd pobierania menu" });
-    }
-
-    console.log(`🍕 Pobrano ${menuItems?.length || 0} pozycji menu dla restauracji ${restaurantId}`);
-    res.json({ menuItems: menuItems || [] });
-  } catch (err) {
-    console.error("❌ Błąd menu endpoint:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// === [7] ORDERS ENDPOINT ===
-app.post("/api/orders", async (req, res) => {
-  try {
-    const { message, restaurant_name, user_email } = req.body;
-    console.log("🟡 ORDER INPUT:", { message, restaurant_name, user_email });
-
-    // Get user_id from Supabase Auth if available
-    let user_id = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const { supabase } = await import('./lib/supabaseClient.js');
-        const token = authHeader.substring(7);
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (user && !error) {
-          user_id = user.id;
-          console.log("✅ User authenticated:", user.email, "ID:", user_id);
-        }
-      } catch (authError) {
-        console.log("⚠️ Auth error:", authError.message);
-      }
-    }
-
-    // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
-
-    // Pobierz restauracje
-    console.log("🏪 Pobieram listę restauracji...");
-    const { data: restaurants, error: restErr } = await supabase.from("restaurants").select("*");
-    if (restErr) throw restErr;
-    console.log(`📋 Znaleziono ${restaurants?.length || 0} restauracji`);
-
-    // Find restaurant
-    const restMatch = restaurants.find(r => 
-      r.name.toLowerCase().includes(restaurant_name.toLowerCase())
-    );
-    if (!restMatch) {
-      console.warn("❌ Nie znaleziono restauracji:", restaurant_name);
-      return res.json({ reply: `Nie mogę znaleźć restauracji "${restaurant_name}".` });
-    }
-
-    console.log("✅ Restauracja dopasowana:", restMatch.name, "(ID:", restMatch.id, ")");
-
-    // Pobierz menu restauracji
-    console.log("🍽️ Pobieram menu dla restauracji:", restMatch.id);
-    const { data: menu, error: menuErr } = await supabase
-      .from("menu_items")
-      .select("*")
-      .eq("restaurant_id", restMatch.id);
-
-    if (menuErr || !menu?.length) {
-      console.warn("❌ Brak menu dla:", restMatch.name, "Błąd:", menuErr);
-      return res.json({ reply: `Nie znalazłem menu dla "${restMatch.name}".` });
-    }
-
-    console.log(`📋 Znaleziono ${menu.length} pozycji w menu`);
-
-    // Parse quantity
-    let quantity = 1;
-    let cleaned = message;
-    const match = message.match(/(\d+)\s*x\s*(.+)/i);
-    if (match) {
-      quantity = parseInt(match[1]);
-      cleaned = match[2];
-      console.log(`🔢 Parsowanie ilości: "${message}" → ${quantity}x "${cleaned}"`);
-    }
-
-    // Find menu item
-    console.log("🔍 Szukam pozycji w menu...");
-    const item = menu.find(m => 
-      m.name.toLowerCase().includes(cleaned.toLowerCase())
-    );
-    if (!item) {
-      console.warn("❌ Brak pozycji:", cleaned);
-      return res.json({ reply: `Nie znalazłem "${cleaned}" w menu. Spróbuj powiedzieć np. "pizza" lub "burger".` });
-    }
-
-    console.log("✅ Pozycja dopasowana:", item.name, "-", item.price_cents/100, "zł");
-
-    // Create order
-    console.log("💾 Tworzę zamówienie w bazie danych...");
-    const orderData = {
-      user_id, // Use user_id from Supabase Auth
-      restaurant_id: restMatch.id,
-      subtotal_cents: item.price_cents * quantity,
-      total_cents: item.price_cents * quantity,
-      status: "pending",
-      delivery: true,
-      eta: "15–20 min"
-    };
-    
-    console.log("📝 Dane zamówienia:", orderData);
-    
-    const { data: order, error: orderErr } = await supabase.from("orders").insert([orderData]).select();
-
-    if (orderErr) {
-      console.error("❌ Błąd tworzenia zamówienia:", orderErr);
-      throw orderErr;
-    }
-
-    console.log("✅ Zamówienie utworzone:", order[0]?.id);
-
-    const response = {
-      reply: `Zamówiłem ${quantity}x ${item.name} w ${restMatch.name} za ${(item.price_cents * quantity / 100).toFixed(0)} zł.`,
-      order_id: order[0]?.id,
-      user_id: user_id
-    };
-    
-    console.log("📤 Odpowiedź:", response);
-    res.json(response);
-
-  } catch (err) {
-    console.error("🔥 Błąd orders endpoint:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// === [8] USER ORDERS ENDPOINT ===
-app.get("/api/user-orders", async (req, res) => {
-  try {
-    // Get user_id from Supabase Auth
-    let user_id = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      try {
-        const { supabase } = await import('./lib/supabaseClient.js');
-        const token = authHeader.substring(7);
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (user && !error) {
-          user_id = user.id;
-          console.log("✅ User authenticated:", user.email, "ID:", user_id);
-        }
-      } catch (authError) {
-        console.log("⚠️ Auth error:", authError.message);
-      }
-    }
-
-    if (!user_id) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
-
-    // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
-
-    // Get user orders
-    const { data: orders, error } = await supabase
-      .from('orders')
-      .select(`
-        *,
-        restaurants (
-          name,
-          address,
-          city
-        )
-      `)
-      .eq('user_id', user_id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error("❌ Błąd pobierania zamówień:", error);
-      return res.status(500).json({ error: "Błąd pobierania zamówień" });
-    }
-
-    console.log(`📋 Pobrano ${orders?.length || 0} zamówień dla użytkownika ${user_id}`);
-    res.json({ orders: orders || [] });
-
-  } catch (err) {
-    console.error("❌ Błąd user-orders endpoint:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// 🔧 Health check – działa pod /api/health
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 3000;

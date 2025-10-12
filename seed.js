@@ -2,8 +2,8 @@ import { createClient } from '@supabase/supabase-js'
 
 // użyj zmiennych środowiskowych albo wklej wartości tymczasowo
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_URL || 'https://ezemaacyyvbpjlagchds.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6ZW1hYWN5eXZicGpsYWdjaGRzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTc4NTUzNiwiZXhwIjoyMDc1MzYxNTM2fQ.YourServiceRoleKeyHere'
 )
 
 async function seedUsers() {

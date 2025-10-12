@@ -3,6 +3,76 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { SessionsClient } from '@google-cloud/dialogflow';
+import OpenAI from 'openai';
+
+// Amber Brain handler
+async function handleAmberBrain(req, res) {
+  try {
+    const { text, userId } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    
+    const AMBER_CORE = `
+You are Amber — the FreeFlow assistant. You're not a chatbot.
+You're a calm, confident Polish female voice who *responds only when necessary*,
+never intrusive, always intuitive.
+
+🎯 Your mission:
+- React like a real human with emotional subtlety.
+- Keep responses short (1–2 sentences).
+- Speak like someone who *understands the rhythm of the day*, not like an algorithm.
+
+💬 Examples:
+- User: "Jadę na miasto"
+  Amber: "Super, chcesz żebym sprawdziła coś w okolicy?"
+- User: "Pada dziś?"
+  Amber: "Tak, trochę. Idealna pora na coś ciepłego do jedzenia."
+- User: "Gdzie zjem pizzę?"
+  Amber: "W Monte Carlo mają świetną Diavolę. Mam otworzyć menu?"
+
+🔊 Tone:
+Warm, slightly ironic, elegant, never overexcited.
+Always end on a "human pause" — like you're *thinking*, not generating.
+`;
+
+    // Simple intent detection
+    const textLower = text.toLowerCase();
+    let intent = "smalltalk";
+    if (textLower.includes("pizza") || textLower.includes("jedzenie")) intent = "food";
+    if (textLower.includes("taxi") || textLower.includes("podwóz")) intent = "taxi";
+    if (textLower.includes("hotel") || textLower.includes("nocleg")) intent = "hotel";
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: AMBER_CORE },
+        { role: "user", content: `INTENT: ${intent}` },
+        { role: "user", content: `USER: ${text}` }
+      ],
+      temperature: 0.8,
+      max_tokens: 100
+    });
+
+    const reply = response.choices[0].message.content.trim();
+
+    res.json({ 
+      ok: true, 
+      reply, 
+      intent,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("❌ Amber Brain error:", err);
+    res.status(500).json({ 
+      ok: false, 
+      error: err.message 
+    });
+  }
+}
 
 // Dialogflow webhook handler
 async function handleDialogflowWebhook(req, res) {
@@ -248,8 +318,8 @@ async function createOrder(req, res) {
 }
 
 const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://xdhlztmjktminrwmzcpl.supabase.co',
-  process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhkaGx6dG1qa3RtaW5yd216Y3BsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY3MjgwMTEsImV4cCI6MjA3MjMwNDAxMX0.EmvBqbygr4VLD3PXFaPjbChakRi5YtSrxp8e_K7ZyGY'
+  process.env.SUPABASE_URL || 'https://ezemaacyyvbpjlagchds.supabase.co',
+  process.env.SUPABASE_ANON_KEY || 'sb_publishable_-i5RiddgTH3Eh9-6xuJ7wQ_KjuredAu'
 );
 
 // Dialogflow setup - use YOUR agent project ID
@@ -804,11 +874,14 @@ export default async function handler(req, res) {
             '/api/menu',
             '/api/orders',
             '/api/search',
-            '/api/places'
+            '/api/places',
+            '/api/amber'
           ]
         });
       case 'dialogflow-freeflow':
         return handleDialogflowWebhook(req, res);
+      case 'amber':
+        return handleAmberBrain(req, res);
       default:
         return res.status(404).json({ error: 'Not found' });
     }

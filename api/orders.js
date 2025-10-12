@@ -71,6 +71,22 @@ export default async function handler(req, res) {
     const { message, restaurant_name, user_email } = req.body;
     console.log("🟡 INPUT:", { message, restaurant_name, user_email });
 
+    // Get user_id from Supabase Auth if available
+    let user_id = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        const { data: { user }, error } = await supabase.auth.getUser(token);
+        if (user && !error) {
+          user_id = user.id;
+          console.log("✅ User authenticated:", user.email, "ID:", user_id);
+        }
+      } catch (authError) {
+        console.log("⚠️ Auth error:", authError.message);
+      }
+    }
+
     // Pobierz restauracje
     console.log("🏪 Pobieram listę restauracji...");
     const { data: restaurants, error: restErr } = await supabase.from("restaurants").select("*");
@@ -127,7 +143,9 @@ export default async function handler(req, res) {
     // Dodaj zamówienie
     console.log("💾 Tworzę zamówienie w bazie danych...");
     const orderData = {
-      user_email,
+      user_id, // Use user_id from Supabase Auth
+      user_email: user_id ? null : user_email, // Fallback to email if no auth
+      restaurant_id: restMatch.id, // Use restaurant_id instead of name
       restaurant_name: restMatch.name,
       item_name: item.name,
       price: item.price * quantity,
