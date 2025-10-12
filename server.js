@@ -1,5 +1,21 @@
 ﻿
-import 'dotenv/config';
+// --- SAFE DOTENV LOADER ---
+import fs from "fs";
+import path from "path";
+import dotenv from "dotenv";
+
+// Wymuś absolutną ścieżkę do pliku .env w tym katalogu
+const envPath = path.resolve(process.cwd(), ".env");
+
+// Sprawdź, czy plik istnieje i załaduj
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+  console.log("🌍 Loaded .env from:", envPath);
+  console.log("🔑 SUPABASE_URL:", process.env.SUPABASE_URL || "(not found)");
+} else {
+  console.warn("⚠️  No .env file found at:", envPath);
+}
+
 import express from "express";
 
 console.log("🌍 ENV CHECK:", {
@@ -9,7 +25,6 @@ console.log("🌍 ENV CHECK:", {
 
 import OpenAI from "openai";
 import multer from "multer";
-import fs from "fs";
 import cors from "cors";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
