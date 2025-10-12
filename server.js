@@ -591,7 +591,7 @@ app.get("/api/restaurants", async (req, res) => {
 
     const { data, error } = await supabase
       .from("restaurants")
-      .select("id, name, address");
+      .select("id, name, address, lat, lng");
 
     if (error) {
       console.error("❌ Supabase query error:", error);

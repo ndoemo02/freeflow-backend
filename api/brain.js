@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     // === POBIERZ RESTAURACJE ===
     const { data: restaurants, error: dbError } = await supabase
       .from("restaurants")
-      .select("id, name, address");
+      .select("id, name, address, lat, lng");
 
     if (dbError) {
       console.error("❌ Supabase error:", dbError.message);
@@ -42,8 +42,27 @@ export default async function handler(req, res) {
 
     let sortedRestaurants = restaurants;
     
-    // TODO: W przyszłości można dodać współrzędne do tabeli restaurants
-    // i wtedy używać sortowania po odległości
+    // --- sortowanie restauracji po odległości ---
+    if (req.body.lat && req.body.lng && restaurants && restaurants.length > 0) {
+      const { lat, lng } = req.body;
+      
+      // Sprawdź czy pierwsza restauracja ma współrzędne
+      const hasCoordinates = restaurants[0] && (restaurants[0].lat !== null && restaurants[0].lat !== undefined);
+      
+      if (hasCoordinates) {
+        sortedRestaurants = restaurants
+          .map(r => ({
+            ...r,
+            distance: r.lat && r.lng ? distance(lat, lng, r.lat, r.lng) : null
+          }))
+          .sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+        
+        console.log("📍 Sorted restaurants by distance:", sortedRestaurants.map(r => ({ name: r.name, distance: r.distance?.toFixed(2) + " km" })));
+      } else {
+        console.log("📍 No coordinates available, using original order");
+      }
+    }
+    
     console.log("📍 Restaurants loaded:", restaurants?.length || 0, "items");
 
     let foundRestaurant = null;
