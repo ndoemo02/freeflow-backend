@@ -56,12 +56,21 @@ export default async function handler(req, res) {
     const restaurantContext = foundRestaurant ? foundRestaurant.name : "Monte Carlo";
     console.log("🧭 Active restaurant context:", restaurantContext);
 
+    // === GENERUJ LISTĘ RESTAURACJI ===
+    const restaurantList = sortedRestaurants
+      .slice(0, 5)
+      .map((r, i) => `${i + 1}. ${r.name}${r.distance ? ` (${r.distance.toFixed(1)} km)` : ''}`)
+      .join("\n");
+
     // === OPENAI ===
     const systemPrompt = `
       Jesteś Amber — asystentką FreeFlow.
       Jeśli użytkownik wspomina nazwę restauracji, przełącz kontekst.
       Jeśli nie mówi żadnej nazwy, zaproponuj kilka z listy.
       Aktualna restauracja: ${restaurantContext}.
+      
+      Dostępne restauracje:
+      ${restaurantList}
     `;
 
     const completion = await openai.chat.completions.create({
