@@ -1,13 +1,8 @@
+import { applyCORS } from "./_cors.js";
+
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
-
+  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  
   return res.status(200).json({
     ok: true,
     ts: new Date().toISOString()

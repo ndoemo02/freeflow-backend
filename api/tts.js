@@ -1,4 +1,5 @@
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
+import { applyCORS } from './_cors.js';
 
 let ttsClient;
 
@@ -30,11 +31,7 @@ function initializeTtsClient() {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
 
   try {
     const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
