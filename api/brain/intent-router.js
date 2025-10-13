@@ -50,7 +50,12 @@ export async function detectIntent(text) {
   const findNearbyKeywords = [
     'zjeść', 'restaurac', 'pizza', 'kebab', 'burger', 'zjeść coś', 'gdzie',
     'w okolicy', 'blisko', 'zamówić', 'coś do jedzenia', 'posiłek', 'obiad',
-    'gdzie zjem', 'co polecasz'
+    'gdzie zjem', 'co polecasz', 'restauracje w pobliżu', 'restauracje w poblizu'
+  ];
+
+  const menuKeywords = [
+    'menu', 'co mogę zjeść', 'co mają', 'pokaż menu', 'co jest w menu',
+    'dania', 'potrawy', 'co serwują', 'co podają', 'karta dań'
   ];
 
   const { data: learned } = await supabase
@@ -58,10 +63,21 @@ export async function detectIntent(text) {
     .select('text, intent');
 
   const learnedNearby = learned?.filter(p => p.intent === 'find_nearby') || [];
-  const dynamicKeywords = learnedNearby.map(p => normalize(p.text));
-  const allKeywords = [...findNearbyKeywords, ...dynamicKeywords];
+  const learnedMenu = learned?.filter(p => p.intent === 'menu_request') || [];
+  
+  const dynamicNearbyKeywords = learnedNearby.map(p => normalize(p.text));
+  const dynamicMenuKeywords = learnedMenu.map(p => normalize(p.text));
+  
+  const allNearbyKeywords = [...findNearbyKeywords, ...dynamicNearbyKeywords];
+  const allMenuKeywords = [...menuKeywords, ...dynamicMenuKeywords];
 
-  if (allKeywords.some(k => lower.includes(k))) {
+  // Sprawdź menu keywords
+  if (allMenuKeywords.some(k => lower.includes(k))) {
+    return { intent: 'menu_request', restaurant: null };
+  }
+
+  // Sprawdź nearby keywords
+  if (allNearbyKeywords.some(k => lower.includes(k))) {
     return { intent: 'find_nearby', restaurant: null };
   }
 

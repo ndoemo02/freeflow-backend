@@ -162,6 +162,54 @@ export default async function handler(req, res) {
       saveContext('select_restaurant', restaurant);
     }
 
+    // --- MENU REQUEST FLOW ---
+    if (intentResult.intent === "menu_request") {
+      const currentContext = getContext();
+      console.log(`[Amber] Processing menu_request intent`);
+      
+      let targetRestaurant = null;
+      
+      // Sprawdź czy mamy restaurację w kontekście
+      if (currentContext.lastRestaurant) {
+        targetRestaurant = currentContext.lastRestaurant;
+        console.log(`[Amber] Using restaurant from context: ${targetRestaurant.name}`);
+      } else {
+        // Spróbuj znaleźć restaurację w tekście
+        const { data: restaurants } = await supabase
+          .from("restaurants")
+          .select("id, name, address, lat, lng");
+        
+        if (restaurants) {
+          for (const restaurant of restaurants) {
+            if (phrase.toLowerCase().includes(restaurant.name.toLowerCase()) ||
+                restaurant.name.toLowerCase().includes(phrase.toLowerCase())) {
+              targetRestaurant = restaurant;
+              console.log(`[Amber] Found restaurant in text: ${targetRestaurant.name}`);
+              break;
+            }
+          }
+        }
+      }
+      
+      if (targetRestaurant) {
+        reply = `W ${targetRestaurant.name} możesz zjeść różne dania. Chcesz, żebym przeczytała kilka propozycji z menu?`;
+        saveContext('menu_request', targetRestaurant);
+      } else {
+        reply = "Nie pamiętam, o której restauracji mówiliśmy. Możesz powtórzyć nazwę?";
+      }
+    }
+
+    // --- CONTEXT-AWARE CONVERSATION ---
+    const currentContext = getContext();
+    console.log(`[Amber] Current context:`, currentContext);
+
+    // Jeśli użytkownik odpowiada "tak" na pytanie o menu
+    if (currentContext.lastIntent === 'menu_request' && currentContext.lastRestaurant && 
+        (phrase.toLowerCase().includes('tak') || phrase.toLowerCase().includes('pokaż'))) {
+      const restaurant = currentContext.lastRestaurant;
+      reply = `W ${restaurant.name} serwują różne dania. Chcesz, żebym przeczytała kilka propozycji z menu?`;
+    }
+
     // --- ORDER FLOW ---
     if (phrase.toLowerCase().includes('pizza') || phrase.toLowerCase().includes('kebab') || phrase.toLowerCase().includes('piwo')) {
       await logOrderToSupabase({ phrase, intent: 'order' });
