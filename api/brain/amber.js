@@ -4,7 +4,9 @@ import { supabase } from "../_supabase.js";
 const BASE_URL =
   process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
-    : "https://freeflow-backend.vercel.app";
+    : process.env.NODE_ENV === 'development' 
+      ? "http://localhost:3000"
+      : "https://freeflow-backend.vercel.app";
 
 const INTENTS = {
   pizza: "order_pizza",
@@ -47,8 +49,11 @@ async function getContext() {
 // --- get restaurants ---
 async function getRestaurants() {
   try {
+    console.log(`[Amber] Fetching restaurants from: ${BASE_URL}/api/restaurants`);
     const res = await fetch(`${BASE_URL}/api/restaurants`);
+    console.log(`[Amber] Response status: ${res.status}`);
     const data = await res.json();
+    console.log(`[Amber] Received ${data.restaurants?.length || 0} restaurants`);
     return data.restaurants || [];
   } catch (err) {
     console.error("[Amber] restaurants fetch failed:", err);
