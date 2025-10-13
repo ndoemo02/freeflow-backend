@@ -68,7 +68,7 @@ function findBestMatch(list, query, field = "name") {
 }
 
 export default async function handler(req, res) {
-  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
     const { message, restaurant_name, user_email } = req.body;

@@ -11,7 +11,7 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
-  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
     const { text, lat, lng } = req.body;

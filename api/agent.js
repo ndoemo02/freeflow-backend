@@ -316,7 +316,7 @@ async function generateTtsAudio(text) {
 }
 
 export default async function agent(req, res) {
-  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

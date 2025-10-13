@@ -3,7 +3,7 @@ import { getContext, saveContext, clearContext } from './memory.js';
 import { applyCORS } from '../_cors.js';
 
 export default async function handler(req, res) {
-  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
     if (req.method === 'GET') {

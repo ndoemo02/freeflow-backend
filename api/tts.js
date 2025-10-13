@@ -31,7 +31,7 @@ function initializeTtsClient() {
 }
 
 export default async function handler(req, res) {
-  if (applyCORS(res)) return; // 👈 ważne: obsługuje preflight
+  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
     const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
