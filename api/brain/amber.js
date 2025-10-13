@@ -1,123 +1,102 @@
-import { detectIntent } from './intent-router.js';
-import { saveContext, getContext, clearContext } from './memory.js';
-import { supabase } from '../_supabase.js';
-import { applyCORS } from '../_cors.js';
+// /api/brain/amber.js
+import { supabase } from "../_supabase.js";
 
-export default async function handler(req, res) {
-  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
+// --- helper: base URL ---
+const BASE_URL =
+  process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://freeflow-backend.vercel.app";
 
+// --- intent keywords ---
+const INTENTS = {
+  pizza: "order_pizza",
+  kebab: "order_kebab",
+  piwo: "order_beer",
+  restauracje: "find_restaurant",
+};
+
+// --- context endpoint sync ---
+async function getContext() {
   try {
-    // 🔍 obsługa danych wejściowych (zależnie od środowiska)
-    let body = {};
-
-    if (req.body) {
-      body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-    } else if (typeof req.text === "function") {
-      // Edge-style Request
-      const text = await req.text();
-      body = JSON.parse(text);
-    } else if (req instanceof Request) {
-      // Dla fetch API Request
-      body = await req.json();
-    } else {
-      throw new Error("❌ Nie udało się sparsować request body");
-    }
-
-    const { text, lat, lng } = body;
-    if (!text) {
-      return res.status(400).json({ ok: false, error: "Brak tekstu w żądaniu" });
-    }
-
-    // 💡 Twoja dalsza logika Amber Brain tutaj...
-    console.log("🧠 Amber Brain processing:", text);
-
-    const intent = await detectIntent(text);
-    const context = getContext();
-
-    // 🔹 Pokaż menu z kontekstu
-    if (/(menu|co mają|zobaczyć menu|co zjeść)/i.test(text)) {
-      if (context.lastRestaurant) {
-        const r = context.lastRestaurant;
-        const reply = `Menu restauracji ${r.name} jest dostępne. Chcesz, żebym przeczytała kilka propozycji?`;
-        saveContext('menu_request', r);
-        return res.json({ ok: true, reply, intent: 'menu_request', restaurant: r });
-      } else {
-        return res.json({ ok: true, reply: 'Nie pamiętam, o której restauracji mówiliśmy. Możesz powtórzyć nazwę?', intent: 'menu_request' });
-      }
-    }
-
-    // 🔹 Wybrano konkretną restaurację
-    if (intent.intent === 'select_restaurant' && intent.restaurant) {
-      const r = intent.restaurant;
-      const reply = `Świetny wybór! ${r.name} znajduje się przy ${r.address}. Chcesz zobaczyć menu?`;
-      saveContext('select_restaurant', r);
-      return res.json({ ok: true, reply, restaurant: r, intent: 'select_restaurant' });
-    }
-
-    // 🔹 Szukanie restauracji z odległością
-    if (intent.intent === 'find_nearby') {
-      if (!lat || !lng) {
-        return res.json({ ok: false, reply: 'Nie znam Twojej lokalizacji. Powiedz, gdzie jesteś.' });
-      }
-
-      const baseUrl =
-        process.env.VERCEL_URL
-          ? `https://${process.env.VERCEL_URL}`
-          : "https://freeflow-backend.vercel.app"; // fallback na produkcję
-
-      try {
-        const response = await fetch(`${baseUrl}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`, {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-        });
-
-        // 🔒 Sprawdź czy nie zwróciło HTML błędu
-        const contentType = response.headers.get("content-type");
-        if (!contentType || !contentType.includes("application/json")) {
-          const html = await response.text();
-          throw new Error(`Invalid JSON response: ${html.slice(0, 100)}...`);
-        }
-
-        const data = await response.json();
-        const { nearby } = data;
-
-        if (!nearby?.length) {
-          return res.json({ ok: true, reply: 'Nie znalazłam żadnych restauracji w pobliżu.', intent: 'find_nearby' });
-        }
-
-        const formatted = nearby
-          .slice(0, 5)
-          .map((r, i) => {
-            const dist = r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)} metrów` : `${r.distance_km.toFixed(1)} km`;
-            return `${i + 1}. ${r.name} (${dist}, ${r.address})`;
-          })
-          .join('\n');
-
-        const reply = `Oto restauracje w promieniu 2 kilometrów:\n${formatted}\nKtórą chcesz wybrać?`;
-        saveContext('find_nearby');
-        return res.json({ ok: true, reply, count: nearby.length, intent: 'find_nearby' });
-      } catch (err) {
-        console.error("Amber Brain fatal error:", err);
-        return res.status(500).json({
-          ok: false,
-          error: err.message || "Unexpected response from context fetch",
-        });
-      }
-    }
-
-    // 🔹 Zmiana tematu (np. lody, hotel, taxi)
-    if (/(lody|hotel|taxi|przewóz|nocleg)/i.test(text)) {
-      clearContext();
-      return res.json({ ok: true, reply: 'Okej! Zmieniam temat. Powiedz, czego potrzebujesz teraz.', intent: 'topic_change' });
-    }
-
-    // 🔹 Fallback neutralny
-    return res.json({ ok: true, reply: 'Nie jestem pewna, co masz na myśli — możesz powtórzyć?', intent: 'none' });
+    const res = await fetch(`${BASE_URL}/api/brain/context`);
+    return await res.json();
   } catch (err) {
-    console.error("Amber Brain fatal error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err.message || "Internal server error"
+    console.error("[Amber] context fetch failed:", err);
+    return null;
+  }
+}
+
+// --- intent detection ---
+function detectIntent(text) {
+  text = text.toLowerCase();
+  for (const [word, intent] of Object.entries(INTENTS)) {
+    if (text.includes(word)) return intent;
+  }
+  return "none";
+}
+
+// --- DB logging ---
+async function logOrderToSupabase({ phrase, intent }) {
+  try {
+    const { data, error } = await supabase
+      .from("orders")
+      .insert([
+        {
+          customer_name: "Anonymous",
+          order_details: phrase,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select();
+
+    if (error) throw error;
+    console.log("[Amber] ✅ Order logged:", data[0]);
+    return data[0];
+  } catch (error) {
+    console.error("[Amber] ❌ Supabase insert error:", error.message);
+    return null;
+  }
+}
+
+// --- handler ---
+export default async function handler(req, res) {
+  try {
+    if (req.method !== "POST")
+      return res.status(405).json({ ok: false, error: "Method not allowed" });
+
+    const body = await req.json?.() ?? req.body;
+    const phrase = body?.text || body?.phrase || "";
+
+    console.log("🧠 Amber Brain received:", phrase);
+
+    // --- detect intent ---
+    const intent = detectIntent(phrase);
+    console.log("🤖 Intent detected:", intent);
+
+    // --- context sync ---
+    const context = await getContext();
+    console.log("📡 Context:", context);
+
+    let reply = "Nie jestem pewna, co masz na myśli — możesz powtórzyć?";
+    if (intent === "order_pizza") reply = "Zamawiam pizzę — proszę potwierdzić rodzaj.";
+    if (intent === "order_beer") reply = "Dwa piwa? Świetny wybór, zamówienie zapisane!";
+    if (intent === "find_restaurant") reply = "Już szukam restauracji w okolicy 🍽️";
+
+    // --- optional DB log ---
+    if (intent.startsWith("order_")) {
+      await logOrderToSupabase({ phrase, intent });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      reply,
+      intent,
+      context,
+      timestamp: new Date().toISOString(),
     });
+  } catch (error) {
+    console.error("Amber Brain fatal error:", error);
+    return res.status(500).json({ ok: false, error: error.message });
   }
 }
