@@ -11,7 +11,7 @@ export default async function amberBrain(req, res) {
     if (lat && lng) {
       // ✅ Użyj lokalnego endpointu z filtrowaniem dystansu
       const nearbyRes = await fetch(
-        `http://localhost:3000/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=3`
+        `http://localhost:3000/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`
       );
       const { nearby: nearbyData } = await nearbyRes.json();
       nearby = nearbyData || [];
@@ -19,7 +19,7 @@ export default async function amberBrain(req, res) {
 
     // 2️⃣ Tworzymy logiczną odpowiedź
     let reply = "Nie mam danych o restauracjach w pobliżu.";
-    if (nearby.length > 0) {
+    if (nearby && nearby.length > 0) {
       const lines = nearby
         .slice(0, 5)
         .map(
@@ -28,7 +28,7 @@ export default async function amberBrain(req, res) {
         )
         .join("\n");
 
-      reply = `Oto restauracje w promieniu 3 kilometrów:\n${lines}\nKtórą chcesz wybrać?`;
+      reply = `Oto restauracje w promieniu 2 kilometrów:\n${lines}\nKtórą chcesz wybrać?`;
     }
 
     console.log("🧠 Amber response:", reply);
