@@ -3,7 +3,7 @@ import { applyCORS } from './_cors.js';
 
 let ttsClient;
 
-function initializeTtsClient() {
+async function initializeTtsClient() {
   if (ttsClient) return ttsClient;
 
   try {
@@ -18,8 +18,8 @@ function initializeTtsClient() {
     // Lokalnie: użyj GOOGLE_APPLICATION_CREDENTIALS
     else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS (local)");
-      const fs = require('fs');
-      const path = require('path');
+      const fs = await import('fs');
+      const path = await import('path');
       const credentialsPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
       if (fs.existsSync(credentialsPath)) {
         credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
@@ -37,8 +37,8 @@ function initializeTtsClient() {
       credentials = JSON.parse(decoded);
     } else {
       console.warn("⚠ No Google credentials found, trying default paths");
-      const fs = require('fs');
-      const path = require('path');
+      const fs = await import('fs');
+      const path = await import('path');
       const defaultPaths = [
         path.join(process.cwd(), 'FreeFlow.json'),
         path.join(process.cwd(), 'service-account.json')
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
 
     console.log('🎧 Chirp HD TTS request:', { text: text.substring(0, 50) + '...', voice, languageCode });
 
-    const client = initializeTtsClient();
+    const client = await initializeTtsClient();
 
     // Google Cloud Text-to-Speech API z Chirp HD
     const request = {
