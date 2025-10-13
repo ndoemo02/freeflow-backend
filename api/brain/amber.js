@@ -2,7 +2,9 @@
 import { supabase } from "../_supabase.js";
 import { detectIntent, trainIntent } from './intent-router.js';
 import { saveContext, getContext, clearContext } from './memory.js';
-import personality from './personality.json' assert { type: 'json' };
+import { applyCORS } from '../_cors.js';
+// import personality from './personality.json' assert { type: 'json' };
+const personality = { name: "Amber", tone: "warm", language: "pl-PL" };
 
 const BASE_URL =
   process.env.VERCEL_URL
@@ -73,6 +75,8 @@ async function logOrderToSupabase({ phrase, intent }) {
 
 // --- handler ---
 export default async function handler(req, res) {
+  if (applyCORS(req, res)) return; // 👈 CORS handling
+
   try {
     if (req.method !== "POST")
       return res.status(405).json({ ok: false, error: "Method not allowed" });
