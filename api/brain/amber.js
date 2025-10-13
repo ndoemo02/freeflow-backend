@@ -50,8 +50,21 @@ async function getContext() {
   }
 }
 
+// --- calculate distance ---
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the Earth in kilometers
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
 // --- get restaurants ---
-async function getRestaurants() {
+async function getRestaurants(userLat, userLng) {
   try {
     // Bezpośrednie zapytanie do Supabase zamiast fetch do siebie
     console.log(`[Amber] Fetching restaurants directly from Supabase`);
@@ -65,6 +78,20 @@ async function getRestaurants() {
     }
     
     console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
+    
+    // Jeśli mamy współrzędne użytkownika, oblicz odległości
+    if (userLat && userLng && data) {
+      const restaurantsWithDistance = data.map(restaurant => ({
+        ...restaurant,
+        distance_km: calculateDistance(userLat, userLng, restaurant.lat, restaurant.lng)
+      }));
+      
+      // Sortuj według odległości
+      restaurantsWithDistance.sort((a, b) => a.distance_km - b.distance_km);
+      console.log(`[Amber] Sorted restaurants by distance`);
+      return restaurantsWithDistance;
+    }
+    
     return data || [];
   } catch (err) {
     console.error("[Amber] restaurants fetch failed:", err);
@@ -135,8 +162,13 @@ export default async function handler(req, res) {
 
     const body = await req.json?.() ?? req.body;
     const phrase = body?.text || body?.phrase || "";
+    const lat = body?.lat;
+    const lng = body?.lng;
 
     console.log("🧠 Amber Brain received:", phrase);
+    if (lat && lng) {
+      console.log(`📍 Location: ${lat}, ${lng}`);
+    }
 
     const intent = detectIntent(phrase);
     console.log("🤖 Detected intent:", intent);
@@ -148,14 +180,25 @@ export default async function handler(req, res) {
 
     // --- RESTAURANT FLOW ---
     if (intent === "find_restaurant") {
-      restaurantsList = await getRestaurants();
+      restaurantsList = await getRestaurants(lat, lng);
       if (restaurantsList.length > 0) {
-        const random = restaurantsList
-          .sort(() => 0.5 - Math.random())
-          .slice(0, 3)
-          .map(r => r.name)
-          .join(", ");
-        reply = `W pobliżu możesz zjeść w: ${random}.`;
+        // Weź 3 najbliższe restauracje
+        const nearby = restaurantsList.slice(0, 3);
+        
+        if (lat && lng) {
+          // Z odległościami
+          const withDistances = nearby.map(r => {
+            const dist = r.distance_km < 1 
+              ? `${Math.round(r.distance_km * 1000)} metrów` 
+              : `${r.distance_km.toFixed(1)} km`;
+            return `${r.name} (${dist})`;
+          }).join(", ");
+          reply = `W pobliżu możesz zjeść w: ${withDistances}.`;
+        } else {
+          // Bez odległości
+          const names = nearby.map(r => r.name).join(", ");
+          reply = `W pobliżu możesz zjeść w: ${names}.`;
+        }
       } else {
         reply = "Nie znalazłam żadnych restauracji w pobliżu.";
       }
