@@ -50,49 +50,31 @@ async function getContext() {
   }
 }
 
-// --- calculate distance ---
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Radius of the Earth in kilometers
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
-
 // --- get restaurants ---
 async function getRestaurants(userLat, userLng) {
   try {
-    // Bezpośrednie zapytanie do Supabase zamiast fetch do siebie
-    console.log(`[Amber] Fetching restaurants directly from Supabase`);
-    const { data, error } = await supabase
-      .from("restaurants")
-      .select("id, name, address, lat, lng");
-    
-    if (error) {
-      console.error("[Amber] Supabase error:", error);
-      return [];
-    }
-    
-    console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
-    
-    // Jeśli mamy współrzędne użytkownika, oblicz odległości
-    if (userLat && userLng && data) {
-      const restaurantsWithDistance = data.map(restaurant => ({
-        ...restaurant,
-        distance_km: calculateDistance(userLat, userLng, restaurant.lat, restaurant.lng)
-      }));
+    if (userLat && userLng) {
+      // Użyj endpointu nearby dla odległości
+      console.log(`[Amber] Fetching nearby restaurants with distances`);
+      const res = await fetch(`${BASE_URL}/api/restaurants/nearby?lat=${userLat}&lng=${userLng}&radius=5`);
+      const data = await res.json();
+      console.log(`[Amber] Received ${data.nearby?.length || 0} nearby restaurants`);
+      return data.nearby || [];
+    } else {
+      // Bez współrzędnych - zwróć wszystkie restauracje
+      console.log(`[Amber] Fetching all restaurants from Supabase`);
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select("id, name, address, lat, lng");
       
-      // Sortuj według odległości
-      restaurantsWithDistance.sort((a, b) => a.distance_km - b.distance_km);
-      console.log(`[Amber] Sorted restaurants by distance`);
-      return restaurantsWithDistance;
+      if (error) {
+        console.error("[Amber] Supabase error:", error);
+        return [];
+      }
+      
+      console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
+      return data || [];
     }
-    
-    return data || [];
   } catch (err) {
     console.error("[Amber] restaurants fetch failed:", err);
     return [];
