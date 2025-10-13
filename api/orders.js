@@ -1,4 +1,4 @@
-import { supabase } from "./brain/supabaseClient.js";
+import { supabase } from "./_supabase.js";
 import { applyCORS } from "./_cors.js";
 
 function normalize(text) {

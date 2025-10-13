@@ -269,7 +269,7 @@ app.post("/api/sessions", async (req, res) => {
     const { action, sessionId, userId, message, eventType, data } = req.body;
 
     // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
 
     switch (action) {
       case 'create_session':
@@ -561,7 +561,7 @@ app.get("/api/realtime-token", async (req, res) => {
 // === [5] RESTAURANTS ENDPOINT ===
 app.get("/api/restaurants", async (req, res) => {
   try {
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
     console.log("🔍 Fetching restaurants...");
 
     const { data, error } = await supabase
@@ -590,7 +590,7 @@ app.get("/api/restaurants/nearby", async (req, res) => {
       return res.status(400).json({ error: "Missing lat/lng parameters" });
     }
 
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
     console.log(`🔍 Finding restaurants near ${lat}, ${lng} within ${radius}km...`);
 
     const { data: restaurants, error } = await supabase
@@ -638,7 +638,7 @@ app.get("/api/menu/:restaurantId", async (req, res) => {
     const { restaurantId } = req.params;
     
     // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
 
     const { data: menuItems, error } = await supabase
       .from('menu_items')
@@ -671,7 +671,7 @@ app.post("/api/orders", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
-        const { supabase } = await import('./lib/supabaseClient.js');
+        const { supabase } = await import('./api/_supabase.js');
         const token = authHeader.substring(7);
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (user && !error) {
@@ -684,7 +684,7 @@ app.post("/api/orders", async (req, res) => {
     }
 
     // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
 
     // Pobierz restauracje
     console.log("🏪 Pobieram listę restauracji...");
@@ -785,7 +785,7 @@ app.get("/api/user-orders", async (req, res) => {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       try {
-        const { supabase } = await import('./lib/supabaseClient.js');
+        const { supabase } = await import('./api/_supabase.js');
         const token = authHeader.substring(7);
         const { data: { user }, error } = await supabase.auth.getUser(token);
         if (user && !error) {
@@ -802,7 +802,7 @@ app.get("/api/user-orders", async (req, res) => {
     }
 
     // Initialize Supabase client
-    const { supabase } = await import('./lib/supabaseClient.js');
+    const { supabase } = await import('./api/_supabase.js');
 
     // Get user orders
     const { data: orders, error } = await supabase
