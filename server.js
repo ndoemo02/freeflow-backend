@@ -82,7 +82,7 @@ import multer from "multer";
 import cors from "cors";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
-import testFlowRouter from "./api/test-flow.js";
+// test-flow.js removed for Vercel compatibility
 
 const app = express();
 
@@ -234,51 +234,7 @@ app.post("/api/brain/context", async (req, res) => {
   }
 });
 
-// Debug Session endpoint
-app.get("/api/debug-session", async (req, res) => {
-  // Set CORS headers
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-
-  // Import and use the debug handler
-  const debugHandler = await import('./api/debug-session.js');
-  return debugHandler.default(req, res);
-});
-
-// Debug Reset endpoint
-app.get("/api/debug-reset", async (req, res) => {
-  // Set CORS headers
-  const origin = req.headers.origin;
-  const allowedOrigins = [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ];
-  
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-
-  // Import and use the reset handler
-  const resetHandler = await import('./api/debug-reset.js');
-  return resetHandler.default(req, res);
-});
+// Debug endpoints removed for Vercel compatibility
 
 // Sessions API endpoint
 app.post("/api/sessions", async (req, res) => {
@@ -359,7 +315,7 @@ app.post("/api/sessions", async (req, res) => {
 });
 
 // Use test flow router
-app.use("/api", testFlowRouter);
+// testFlowRouter removed for Vercel compatibility
 
 // Add agent endpoint
 app.post("/api/agent", async (req, res) => {

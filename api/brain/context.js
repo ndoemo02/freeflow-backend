@@ -1,24 +1,28 @@
 // api/brain/context.js
-import { getMemory, setMemory } from './memory.js';
+import { getContext, saveContext, clearContext } from './memory.js';
 
 export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
-      const memory = await getMemory();
+      const context = getContext();
       return res.status(200).json({
         ok: true,
-        context: memory.context,
-        lastIntent: memory.lastIntent,
-        status: memory.status || 'idle',
-        lastMessage: memory.lastMessage || null,
+        lastRestaurant: context.lastRestaurant,
+        lastIntent: context.lastIntent,
+        lastUpdated: context.lastUpdated,
         timestamp: new Date().toISOString()
       });
     }
 
     if (req.method === 'POST') {
-      const { status, context, lastIntent, lastMessage } = req.body;
-      await setMemory({ status, context, lastIntent, lastMessage });
-      return res.status(200).json({ ok: true, message: 'Context updated' });
+      const { intent, restaurant } = req.body;
+      if (intent === 'clear') {
+        clearContext();
+        return res.status(200).json({ ok: true, message: 'Context cleared' });
+      } else {
+        saveContext(intent, restaurant);
+        return res.status(200).json({ ok: true, message: 'Context updated' });
+      }
     }
 
     return res.status(405).json({ ok: false, error: 'Method not allowed' });

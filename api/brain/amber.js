@@ -1,88 +1,67 @@
-// api/brain/amber.js
-import { setMemory } from './memory.js';
+import { detectIntent } from './intent-router.js';
+import { saveContext, getContext, clearContext } from './memory.js';
+import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+dotenv.config();
 
-// --- NATURALNE FORMATOWANIE DYSTANSU ---
-const formatDistance = (distKm) => {
-  const distMeters = distKm * 1000;
-
-  if (distMeters < 100) {
-    return `${Math.round(distMeters)} metrów`; // np. 72 m
-  } else if (distMeters < 500) {
-    return `${Math.round(distMeters / 10) * 10} metrów`; // zaokrąglenie do 10 m
-  } else if (distMeters < 1000) {
-    return `${Math.round(distMeters / 10) * 10} metrów`; // np. 720 m
-  } else if (distMeters < 2000) {
-    const km = (distMeters / 1000).toFixed(1).replace('.', ',');
-    return `${km} kilometra`; // np. 1,2 kilometra
-  } else {
-    const km = Math.round(distMeters / 1000);
-    return `${km} kilometrów`; // np. 2 km
-  }
-};
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 export default async function handler(req, res) {
   try {
-    const { text, lat, lng } = req.body;
+    const { text } = req.body;
+    if (!text) return res.status(400).json({ ok: false, error: 'Missing text' });
 
-    if (!text) return res.status(400).json({ error: "Missing text input" });
+    const intent = await detectIntent(text);
+    const context = getContext();
 
-    // 🧠 Amber zaczyna myśleć
-    await setMemory({ status: 'thinking' });
-
-    // 1️⃣ Jeśli mamy współrzędne, używamy ich do dopasowania najbliższych lokali
-    let nearby = [];
-    if (lat && lng) {
-      // ✅ Użyj lokalnego endpointu z filtrowaniem dystansu
-      const nearbyRes = await fetch(
-        `http://localhost:3000/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`
-      );
-      const { nearby: nearbyData } = await nearbyRes.json();
-      nearby = nearbyData || [];
+    // 🔹 Użytkownik mówi: 'pokaż menu' albo 'co mają do jedzenia'
+    if (/(menu|co mają|zobaczyć menu|co zjeść)/i.test(text)) {
+      if (context.lastRestaurant) {
+        const r = context.lastRestaurant;
+        const reply = `Menu restauracji ${r.name} jest dostępne. Chcesz, żebym przeczytała kilka propozycji?`;
+        saveContext('menu_request', r);
+        return res.json({ ok: true, reply, intent: 'menu_request', restaurant: r });
+      } else {
+        return res.json({ ok: true, reply: 'Nie pamiętam, o której restauracji mówiliśmy. Możesz powtórzyć nazwę?', intent: 'menu_request' });
+      }
     }
 
-    // 2️⃣ Tworzymy logiczną odpowiedź
-    let reply = "Nie mam danych o restauracjach w pobliżu.";
-    let intent = 'general';
-    let context = {};
+    // 🔹 Intencja: wybrano konkretną restaurację
+    if (intent.intent === 'select_restaurant' && intent.restaurant) {
+      const r = intent.restaurant;
+      const reply = `Świetny wybór! ${r.name} znajduje się przy ${r.address}. Chcesz zobaczyć menu?`;
+      saveContext('select_restaurant', r);
+      return res.json({ ok: true, reply, restaurant: r, intent: 'select_restaurant' });
+    }
 
-    if (nearby && nearby.length > 0) {
-      // --- GENEROWANIE LISTY ---
-      const listText = nearby
+    // 🔹 Intencja: szukanie restauracji
+    if (intent.intent === 'find_nearby') {
+      const { data: restaurants } = await supabase.from('restaurants').select('*');
+      if (!restaurants?.length) return res.json({ ok: false, reply: 'Nie znalazłam restauracji w bazie.' });
+
+      const list = restaurants
         .slice(0, 5)
-        .map(
-          (r, i) =>
-            `${i + 1}. ${r.name} (${formatDistance(r.distance_km)}, ${r.address})`
-        )
-        .join("\n");
+        .map((r, i) => `${i + 1}. ${r.name} (${r.address})`)
+        .join('\n');
 
-      reply = `Oto restauracje w promieniu 2 kilometrów:\n${listText}\nKtórą chcesz wybrać?`;
-      intent = 'find_restaurant';
-      context = { lat, lng, restaurantCount: nearby.length };
+      const reply = `Oto restauracje w promieniu 2 kilometrów:\n${list}\nKtórą chcesz wybrać?`;
+      saveContext('find_nearby');
+      return res.json({ ok: true, reply, count: restaurants.length, intent: 'find_nearby' });
     }
 
-    // 💬 Gdy generuje odpowiedź
-    await setMemory({
-      status: 'speaking',
-      lastIntent: intent,
-      context,
-      lastMessage: reply,
-    });
+    // 🔹 Użytkownik zmienia temat – np. mówi o lodach, hotelu, taksówce
+    if (/(lody|hotel|taxi|przewóz|nocleg)/i.test(text)) {
+      clearContext();
+      return res.json({ ok: true, reply: 'Okej! Zmieniam temat. Powiedz, czego potrzebujesz teraz.', intent: 'topic_change' });
+    }
 
-    console.log("🧠 Amber response:", reply);
-    
-    // Odpowiedź do frontu
-    res.json({
-      ok: true,
-      reply,
-      count: nearby.length,
-      timestamp: new Date().toISOString(),
-    });
-
-    // ⏳ Po chwili spoczynku
-    setTimeout(() => setMemory({ status: 'idle' }), 2000);
+    // 🔹 Fallback neutralny
+    return res.json({ ok: true, reply: 'Nie jestem pewna, co masz na myśli — możesz powtórzyć?', intent: 'none' });
   } catch (err) {
-    console.error("Amber brain error:", err);
-    await setMemory({ status: 'confused' });
-    res.status(500).json({ error: "Server error", details: err.message });
+    console.error('Amber Brain error:', err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 }

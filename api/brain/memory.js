@@ -1,15 +1,23 @@
-// api/brain/memory.js
 let memory = {
-  context: null,
+  lastRestaurant: null,
   lastIntent: null,
-  lastMessage: null,
-  status: 'idle',
+  lastUpdated: null,
 };
 
-export async function getMemory() {
+export function saveContext(newIntent, restaurant = null) {
+  memory.lastIntent = newIntent;
+  if (restaurant) memory.lastRestaurant = restaurant;
+  memory.lastUpdated = Date.now();
+}
+
+export function getContext() {
+  // Czyści kontekst po 10 minutach bezczynności
+  if (memory.lastUpdated && Date.now() - memory.lastUpdated > 10 * 60 * 1000) {
+    memory = { lastRestaurant: null, lastIntent: null, lastUpdated: null };
+  }
   return memory;
 }
 
-export async function setMemory(update) {
-  memory = { ...memory, ...update };
+export function clearContext() {
+  memory = { lastRestaurant: null, lastIntent: null, lastUpdated: null };
 }
