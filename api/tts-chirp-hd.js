@@ -1,5 +1,6 @@
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import { applyCORS } from './_cors.js';
+import { getVertexAccessToken } from '../utils/googleAuth.js';
 
 let ttsClient;
 
@@ -7,57 +8,12 @@ async function initializeTtsClient() {
   if (ttsClient) return ttsClient;
 
   try {
-    let credentials;
-
-    // Vercel: użyj GOOGLE_VOICEORDER_KEY_B64
-    if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
-      console.log("✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel)");
-      const decoded = Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf8');
-      credentials = JSON.parse(decoded);
-    }
-    // Lokalnie: użyj GOOGLE_APPLICATION_CREDENTIALS
-    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS (local)");
-      const fs = await import('fs');
-      const path = await import('path');
-      const credentialsPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-      if (fs.existsSync(credentialsPath)) {
-        credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-      } else {
-        throw new Error(`Credentials file not found: ${credentialsPath}`);
-      }
-    }
-    // Fallback: inne zmienne
-    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_JSON");
-      credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_BASE64");
-      const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
-      credentials = JSON.parse(decoded);
-    } else {
-      console.warn("⚠ No Google credentials found, trying default paths");
-      const fs = await import('fs');
-      const path = await import('path');
-      const defaultPaths = [
-        path.join(process.cwd(), 'FreeFlow.json'),
-        path.join(process.cwd(), 'service-account.json')
-      ];
-      
-      for (const credentialsPath of defaultPaths) {
-        if (fs.existsSync(credentialsPath)) {
-          console.log(`✅ Using default credentials: ${credentialsPath}`);
-          credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-          break;
-        }
-      }
-      
-      if (!credentials) {
-        throw new Error('No Google credentials found in any location');
-      }
-    }
-
-    ttsClient = new TextToSpeechClient({ credentials });
+    // Użyj dedykowanego modułu do autoryzacji
+    const token = await getVertexAccessToken();
+    
+    // Dla Google Cloud Client potrzebujemy credentials, nie token
+    // Więc używamy prostszego podejścia z bezpośrednim wywołaniem API
+    ttsClient = { token }; // Symulujemy client z tokenem
     return ttsClient;
   } catch (error) {
     console.error('❌ Failed to initialize TTS client:', error);
@@ -76,12 +32,12 @@ export default async function handler(req, res) {
 
     const client = await initializeTtsClient();
 
-    // Google Cloud Text-to-Speech API z najlepszymi parametrami
-    const request = {
+    // Bezpośrednie wywołanie Google TTS API z tokenem
+    const requestBody = {
       input: { text },
       voice: {
         languageCode,
-        name: voice, // Używamy standardowego głosu (Chirp może nie być dostępny)
+        name: voice,
         ssmlGender: 'FEMALE'
       },
       audioConfig: {
@@ -92,8 +48,23 @@ export default async function handler(req, res) {
       }
     };
 
-    const [response] = await client.synthesizeSpeech(request);
-    const audioBuffer = Buffer.from(response.audioContent);
+    const response = await fetch('https://texttospeech.googleapis.com/v1/text:synthesize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${client.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Google TTS API error:', errorText);
+      throw new Error(`TTS API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const audioBuffer = Buffer.from(data.audioContent, 'base64');
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', audioBuffer.length);
