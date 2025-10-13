@@ -1,28 +1,26 @@
-// api/_cors.js
 export function applyCORS(req, res) {
-  try {
-    const origin = req.headers.origin || "*";
+  const allowedOrigins = [
+    "https://freeflow-frontend-seven.vercel.app",
+    "https://freeflow-frontend.vercel.app",
+    "http://localhost:5173",
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
+  ].filter(Boolean);
 
+  const origin = req.headers.origin;
+
+  if (allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-
-    // 👇 krytyczny fallback dla Vercel nested requests
-    if (!res.getHeader("Access-Control-Allow-Origin")) {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-    }
-
-    if (req.method === "OPTIONS") {
-      res.status(200).end();
-      return true;
-    }
-
-    return false;
-  } catch (err) {
-    console.error("CORS setup error:", err);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    return false;
+  } else {
+    // domyślnie odrzuć, ale loguj do konsoli
+    console.warn(`🚫 CORS BLOCKED ORIGIN: ${origin}`);
   }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return true;
+  }
+  return false;
 }
