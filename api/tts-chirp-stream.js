@@ -79,7 +79,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Text is required' });
     }
 
-    console.log('🔴 Chirp Live Stream TTS request:', { text: text.substring(0, 50) + '...', voice, languageCode });
+    console.log('🔴 Live Stream TTS request:', { text: text.substring(0, 50) + '...', voice, languageCode });
 
     const client = await initializeTtsClient();
 
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       input: { text },
       voice: {
         languageCode,
-        name: 'pl-PL-Chirp-A', // Chirp model dla Live Streaming
+        name: 'pl-PL-Standard-A', // Standard Polish voice (Chirp not available)
         ssmlGender: 'FEMALE'
       },
       audioConfig: {
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-TTS-Mode', 'live-streaming'); // Custom header for live mode
     
-    console.log('✅ Chirp Live Stream TTS generated:', audioBuffer.length, 'bytes');
+    console.log('✅ Live Stream TTS generated:', audioBuffer.length, 'bytes');
     res.send(audioBuffer);
 
   } catch (error) {
