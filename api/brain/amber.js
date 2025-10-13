@@ -1,5 +1,8 @@
 // /api/brain/amber.js
 import { supabase } from "../_supabase.js";
+import { detectIntent, trainIntent } from './intent-router.js';
+import { saveContext, getContext, clearContext } from './memory.js';
+import personality from './personality.json' assert { type: 'json' };
 
 const BASE_URL =
   process.env.VERCEL_URL
@@ -8,47 +11,9 @@ const BASE_URL =
       ? "http://localhost:3000"
       : "https://freeflow-backend.vercel.app";
 
-const INTENTS = {
-  pizza: "order_pizza",
-  kebab: "order_kebab",
-  piwo: "order_beer",
-  restauracja: "find_restaurant",
-  restauracje: "find_restaurant",
-  knajpa: "find_restaurant",
-  bar: "find_restaurant",
-  jedzenie: "find_restaurant",
-  zjem: "find_restaurant",
-  zjeść: "find_restaurant",
-  zjesc: "find_restaurant",
-  gdzie: "find_restaurant",
-  mogę: "find_restaurant",
-  moge: "find_restaurant",
-  pobliżu: "find_restaurant",
-  pobliż: "find_restaurant",
-  okolicy: "find_restaurant",
-  blisko: "find_restaurant",
-  obok: "find_restaurant",
-  polecasz: "find_restaurant",
-  polecacie: "find_restaurant",
-  smaczne: "find_restaurant",
-  dobre: "find_restaurant",
-  dobra: "find_restaurant",
-};
+// Usunięto - używamy intent-router.js
 
-// --- get context
-async function getContext() {
-  try {
-    // Zwróć prosty kontekst zamiast fetch do siebie
-    return {
-      lastRestaurant: null,
-      lastIntent: null,
-      lastUpdated: new Date().toISOString()
-    };
-  } catch (err) {
-    console.error("[Amber] context fetch failed:", err);
-    return null;
-  }
-}
+// Usunięto - używamy memory.js
 
 // --- get restaurants ---
 async function getRestaurants(userLat, userLng) {
@@ -81,37 +46,7 @@ async function getRestaurants(userLat, userLng) {
   }
 }
 
-// --- detect intent ---
-function detectIntent(text) {
-  text = text.toLowerCase();
-  
-  // Sprawdź frazy wielowyrazowe
-  const phrases = [
-    "gdzie mogę zjeść",
-    "gdzie moge zjesc", 
-    "restauracje w pobliżu",
-    "restauracje w poblizu",
-    "co polecasz do jedzenia",
-    "gdzie jest dobre jedzenie",
-    "gdzie zjeść w okolicy",
-    "gdzie zjesc w okolicy",
-    "co jest smaczne",
-    "gdzie jest blisko",
-    "restauracja w pobliżu",
-    "restauracja w poblizu"
-  ];
-  
-  for (const phrase of phrases) {
-    if (text.includes(phrase)) return "find_restaurant";
-  }
-  
-  // Sprawdź pojedyncze słowa
-  for (const [word, intent] of Object.entries(INTENTS)) {
-    if (text.includes(word)) return intent;
-  }
-  
-  return "none";
-}
+// Usunięto - używamy intent-router.js
 
 // --- log order ---
 async function logOrderToSupabase({ phrase, intent }) {
@@ -152,16 +87,17 @@ export default async function handler(req, res) {
       console.log(`📍 Location: ${lat}, ${lng}`);
     }
 
-    const intent = detectIntent(phrase);
-    console.log("🤖 Detected intent:", intent);
+    // Użyj zaawansowanego rozpoznawania intencji
+    const intentResult = await detectIntent(phrase);
+    console.log("🤖 Detected intent:", intentResult);
 
-    const context = await getContext();
+    const context = getContext();
 
     let reply = "Nie jestem pewna, co masz na myśli — możesz powtórzyć?";
     let restaurantsList = [];
 
     // --- RESTAURANT FLOW ---
-    if (intent === "find_restaurant") {
+    if (intentResult.intent === "find_nearby") {
       restaurantsList = await getRestaurants(lat, lng);
       if (restaurantsList.length > 0) {
         // Weź 3 najbliższe restauracje
@@ -181,23 +117,33 @@ export default async function handler(req, res) {
           const names = nearby.map(r => r.name).join(", ");
           reply = `W pobliżu możesz zjeść w: ${names}.`;
         }
+        saveContext('find_nearby');
       } else {
         reply = "Nie znalazłam żadnych restauracji w pobliżu.";
       }
     }
 
+    // --- SELECT RESTAURANT FLOW ---
+    if (intentResult.intent === "select_restaurant" && intentResult.restaurant) {
+      const restaurant = intentResult.restaurant;
+      reply = `Świetny wybór! ${restaurant.name} znajduje się przy ${restaurant.address}. Chcesz zobaczyć menu?`;
+      saveContext('select_restaurant', restaurant);
+    }
+
     // --- ORDER FLOW ---
-    if (intent.startsWith("order_")) {
-      await logOrderToSupabase({ phrase, intent });
+    if (phrase.toLowerCase().includes('pizza') || phrase.toLowerCase().includes('kebab') || phrase.toLowerCase().includes('piwo')) {
+      await logOrderToSupabase({ phrase, intent: 'order' });
       reply = `Zapisuję zamówienie: ${phrase}`;
     }
 
     return res.status(200).json({
       ok: true,
       reply,
-      intent,
+      intent: intentResult.intent,
+      restaurant: intentResult.restaurant,
       context,
       restaurants: restaurantsList,
+      personality: personality.name,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
