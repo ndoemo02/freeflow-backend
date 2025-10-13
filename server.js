@@ -76,6 +76,8 @@ console.log("✅ FreeFlow Watchdog initialized successfully.\n");
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
 import amberBrain from "./api/brain/amber.js";
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
 
 import OpenAI from "openai";
 import multer from "multer";
@@ -904,5 +906,35 @@ app.get("/api/health", async (req, res) => {
   res.json(health);
 });
 
+// --- WebSocket Server Setup ---
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 FreeFlow Voice Expert działa na porcie ${PORT}`));
+
+// Utwórz HTTP server
+const server = createServer(app);
+
+// Utwórz WebSocket server
+const wss = new WebSocketServer({ 
+  server,
+  path: '/api/stt-stream'
+});
+
+wss.on('connection', (ws, req) => {
+  console.log('🔴 WebSocket client connected to STT stream');
+  
+  ws.on('message', (message) => {
+    console.log('🔴 Received audio chunk:', message.length, 'bytes');
+    // Tutaj będzie obsługa audio chunks
+  });
+  
+  ws.on('close', () => {
+    console.log('🔴 WebSocket client disconnected');
+  });
+  
+  ws.on('error', (error) => {
+    console.error('🔴 WebSocket error:', error);
+  });
+});
+
+// Uruchom server
+server.listen(PORT, () => console.log(`🚀 FreeFlow Voice Expert działa na porcie ${PORT}`));
