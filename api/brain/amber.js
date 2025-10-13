@@ -46,7 +46,11 @@ export default async function handler(req, res) {
         return res.json({ ok: false, reply: 'Nie znam Twojej lokalizacji. Powiedz, gdzie jesteś.' });
       }
 
-      const nearbyUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`;
+      const baseUrl = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : "http://localhost:3000";
+
+      const nearbyUrl = `${baseUrl}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`;
       const nearbyRes = await fetch(nearbyUrl);
       const { nearby } = await nearbyRes.json();
 
