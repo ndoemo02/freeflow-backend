@@ -213,6 +213,28 @@ app.post("/api/tts", async (req, res) => {
   }
 });
 
+// Chirp HD TTS endpoint
+app.post("/api/tts-chirp-hd", async (req, res) => {
+  try {
+    const chirpHDHandler = await import('./api/tts-chirp-hd.js');
+    return chirpHDHandler.default(req, res);
+  } catch (error) {
+    console.error('❌ Chirp HD TTS error:', error);
+    res.status(500).json({ error: 'Chirp HD TTS failed' });
+  }
+});
+
+// Chirp Live Stream TTS endpoint
+app.post("/api/tts-chirp-stream", async (req, res) => {
+  try {
+    const chirpStreamHandler = await import('./api/tts-chirp-stream.js');
+    return chirpStreamHandler.default(req, res);
+  } catch (error) {
+    console.error('❌ Chirp Live Stream TTS error:', error);
+    res.status(500).json({ error: 'Chirp Live Stream TTS failed' });
+  }
+});
+
 // FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
 app.post("/api/brain", amberBrain);
 
