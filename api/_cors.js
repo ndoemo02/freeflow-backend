@@ -7,12 +7,10 @@ export function applyCORS(req, res) {
   ].filter(Boolean);
 
   const origin = req.headers.origin;
-
   if (allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   } else {
-    // domyślnie odrzuć, ale loguj do konsoli
-    console.warn(`🚫 CORS BLOCKED ORIGIN: ${origin}`);
+    console.warn(`🚫 CORS blocked origin: ${origin}`);
   }
 
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
