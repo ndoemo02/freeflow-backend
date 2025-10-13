@@ -16,6 +16,21 @@ const INTENTS = {
   bar: "find_restaurant",
   jedzenie: "find_restaurant",
   zjem: "find_restaurant",
+  zjeść: "find_restaurant",
+  zjesc: "find_restaurant",
+  gdzie: "find_restaurant",
+  mogę: "find_restaurant",
+  moge: "find_restaurant",
+  pobliżu: "find_restaurant",
+  pobliż: "find_restaurant",
+  okolicy: "find_restaurant",
+  blisko: "find_restaurant",
+  obok: "find_restaurant",
+  polecasz: "find_restaurant",
+  polecacie: "find_restaurant",
+  smaczne: "find_restaurant",
+  dobre: "find_restaurant",
+  dobra: "find_restaurant",
 };
 
 // --- get context
@@ -44,9 +59,32 @@ async function getRestaurants() {
 // --- detect intent ---
 function detectIntent(text) {
   text = text.toLowerCase();
+  
+  // Sprawdź frazy wielowyrazowe
+  const phrases = [
+    "gdzie mogę zjeść",
+    "gdzie moge zjesc", 
+    "restauracje w pobliżu",
+    "restauracje w poblizu",
+    "co polecasz do jedzenia",
+    "gdzie jest dobre jedzenie",
+    "gdzie zjeść w okolicy",
+    "gdzie zjesc w okolicy",
+    "co jest smaczne",
+    "gdzie jest blisko",
+    "restauracja w pobliżu",
+    "restauracja w poblizu"
+  ];
+  
+  for (const phrase of phrases) {
+    if (text.includes(phrase)) return "find_restaurant";
+  }
+  
+  // Sprawdź pojedyncze słowa
   for (const [word, intent] of Object.entries(INTENTS)) {
     if (text.includes(word)) return intent;
   }
+  
   return "none";
 }
 
