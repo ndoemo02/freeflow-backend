@@ -9,7 +9,26 @@ function initializeTtsClient() {
   try {
     let credentials;
 
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    // Vercel: użyj GOOGLE_VOICEORDER_KEY_B64
+    if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
+      console.log("✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel)");
+      const decoded = Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf8');
+      credentials = JSON.parse(decoded);
+    }
+    // Lokalnie: użyj GOOGLE_APPLICATION_CREDENTIALS
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS (local)");
+      const fs = require('fs');
+      const path = require('path');
+      const credentialsPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+      if (fs.existsSync(credentialsPath)) {
+        credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+      } else {
+        throw new Error(`Credentials file not found: ${credentialsPath}`);
+      }
+    }
+    // Fallback: inne zmienne
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
       console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_JSON");
       credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
     } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
@@ -17,14 +36,24 @@ function initializeTtsClient() {
       const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
       credentials = JSON.parse(decoded);
     } else {
-      console.warn("⚠ No Google credentials found, using local file");
+      console.warn("⚠ No Google credentials found, trying default paths");
       const fs = require('fs');
       const path = require('path');
-      const credentialsPath = path.join(process.cwd(), 'service-account.json');
-      if (fs.existsSync(credentialsPath)) {
-        credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-      } else {
-        throw new Error('No Google credentials found');
+      const defaultPaths = [
+        path.join(process.cwd(), 'FreeFlow.json'),
+        path.join(process.cwd(), 'service-account.json')
+      ];
+      
+      for (const credentialsPath of defaultPaths) {
+        if (fs.existsSync(credentialsPath)) {
+          console.log(`✅ Using default credentials: ${credentialsPath}`);
+          credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+          break;
+        }
+      }
+      
+      if (!credentials) {
+        throw new Error('No Google credentials found in any location');
       }
     }
 
