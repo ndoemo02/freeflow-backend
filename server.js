@@ -82,29 +82,25 @@ import multer from "multer";
 import cors from "cors";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
+import { ALLOWED_HEADERS, isAllowedOrigin } from "./api/_cors.js";
 // test-flow.js removed for Vercel compatibility
 
 const app = express();
 
 // --- CORS FIX (dla Vercel i lokalnie) ---
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://freeflow-frontend-seven.vercel.app"
-];
-
 app.use(cors({
-  origin: function (origin, callback) {
+  origin(origin, callback) {
     // Pozwala na brak nagłówka origin przy testach np. z Postmana
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
+    if (isAllowedOrigin(origin)) {
       return callback(null, true);
     }
     console.warn(`🚨 CORS blocked origin: ${origin}`);
     return callback(new Error("CORS policy violation"), false);
   },
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: false,
+  allowedHeaders: ALLOWED_HEADERS,
+  credentials: true,
   optionsSuccessStatus: 200
 }));
 
@@ -265,7 +261,7 @@ app.post("/api/brain/train", async (req, res) => {
 app.post("/api/sessions", async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS.join(', '));
   
   if (req.method === 'OPTIONS') return res.status(200).end();
 
