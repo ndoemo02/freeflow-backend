@@ -7,21 +7,29 @@ export default async function handler(req, res) {
   if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
-    const raw = await req.text();
-    let body;
+    // 🔍 obsługa danych wejściowych (zależnie od środowiska)
+    let body = {};
 
-    try {
-      body = JSON.parse(raw);
-    } catch (err) {
-      console.error("Amber Brain: invalid JSON body", raw.slice(0, 200));
-      return res.status(400).json({ ok: false, error: "Invalid JSON input" });
+    if (req.body) {
+      body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    } else if (typeof req.text === "function") {
+      // Edge-style Request
+      const text = await req.text();
+      body = JSON.parse(text);
+    } else if (req instanceof Request) {
+      // Dla fetch API Request
+      body = await req.json();
+    } else {
+      throw new Error("❌ Nie udało się sparsować request body");
     }
 
-    // 🔍 Debug log wejścia:
-    console.log("Amber Brain input:", body);
-
     const { text, lat, lng } = body;
-    if (!text) return res.status(400).json({ ok: false, error: 'Missing text' });
+    if (!text) {
+      return res.status(400).json({ ok: false, error: "Brak tekstu w żądaniu" });
+    }
+
+    // 💡 Twoja dalsza logika Amber Brain tutaj...
+    console.log("🧠 Amber Brain processing:", text);
 
     const intent = await detectIntent(text);
     const context = getContext();
