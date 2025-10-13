@@ -17,31 +17,54 @@ const BASE_URL =
 
 // Usunięto - używamy memory.js
 
+// --- calculate distance ---
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371; // promień Ziemi w km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // --- get restaurants ---
 async function getRestaurants(userLat, userLng) {
   try {
-    if (userLat && userLng) {
-      // Użyj endpointu nearby dla odległości
-      console.log(`[Amber] Fetching nearby restaurants with distances`);
-      const res = await fetch(`${BASE_URL}/api/restaurants/nearby?lat=${userLat}&lng=${userLng}&radius=5`);
-      const data = await res.json();
-      console.log(`[Amber] Received ${data.nearby?.length || 0} nearby restaurants`);
-      return data.nearby || [];
-    } else {
-      // Bez współrzędnych - zwróć wszystkie restauracje
-      console.log(`[Amber] Fetching all restaurants from Supabase`);
-      const { data, error } = await supabase
-        .from("restaurants")
-        .select("id, name, address, lat, lng");
-      
-      if (error) {
-        console.error("[Amber] Supabase error:", error);
-        return [];
-      }
-      
-      console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
-      return data || [];
+    console.log(`[Amber] Fetching restaurants from Supabase`);
+    const { data, error } = await supabase
+      .from("restaurants")
+      .select("id, name, address, lat, lng");
+    
+    if (error) {
+      console.error("[Amber] Supabase error:", error);
+      return [];
     }
+    
+    console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
+    
+    if (!data || data.length === 0) {
+      console.log(`[Amber] No restaurants found in database`);
+      return [];
+    }
+    
+    // Jeśli mamy współrzędne użytkownika, oblicz odległości
+    if (userLat && userLng) {
+      const restaurantsWithDistance = data.map(restaurant => ({
+        ...restaurant,
+        distance_km: calculateDistance(userLat, userLng, restaurant.lat, restaurant.lng)
+      }));
+      
+      // Sortuj według odległości
+      restaurantsWithDistance.sort((a, b) => a.distance_km - b.distance_km);
+      console.log(`[Amber] Sorted restaurants by distance`);
+      return restaurantsWithDistance;
+    }
+    
+    return data || [];
   } catch (err) {
     console.error("[Amber] restaurants fetch failed:", err);
     return [];
@@ -102,10 +125,14 @@ export default async function handler(req, res) {
 
     // --- RESTAURANT FLOW ---
     if (intentResult.intent === "find_nearby") {
+      console.log(`[Amber] Processing find_nearby intent`);
       restaurantsList = await getRestaurants(lat, lng);
+      console.log(`[Amber] Found ${restaurantsList.length} restaurants`);
+      
       if (restaurantsList.length > 0) {
         // Weź 3 najbliższe restauracje
         const nearby = restaurantsList.slice(0, 3);
+        console.log(`[Amber] Selected ${nearby.length} nearby restaurants:`, nearby.map(r => r.name));
         
         if (lat && lng) {
           // Z odległościami
@@ -123,6 +150,7 @@ export default async function handler(req, res) {
         }
         saveContext('find_nearby');
       } else {
+        console.log(`[Amber] No restaurants found - returning fallback message`);
         reply = "Nie znalazłam żadnych restauracji w pobliżu.";
       }
     }
