@@ -1,69 +1,58 @@
-import { TextToSpeechClient } from '@google-cloud/text-to-speech';
+// /api/tts.js - Google Chirp HD with Adaptive Tone
 import { applyCORS } from './_cors.js';
 
-let ttsClient;
-
-function initializeTtsClient() {
-  if (ttsClient) return ttsClient;
+export default async function handler(req, res) {
+  if (applyCORS(req, res)) return;
 
   try {
-    let credentials;
-
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_JSON");
-      credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_BASE64");
-      const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
-      credentials = JSON.parse(decoded);
-    } else {
-      console.warn("⚠ No Google credentials found, using local file");
-      credentials = { keyFilename: './service-account.json' };
+    const { text, tone } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "Missing text parameter" });
     }
 
-    ttsClient = new TextToSpeechClient({ credentials });
-  } catch (err) {
-    console.error("❌ TTS init error:", err);
-    throw new Error(`Failed to initialize TTS client: ${err.message}`);
-  }
+    // Adaptive tone parameters
+    const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
+    const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
+    
+    console.log('🎤 TTS with tone:', { tone, pitch, speakingRate });
 
-  return ttsClient;
-}
+    const response = await fetch(
+      "https://texttospeech.googleapis.com/v1/text:synthesize",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.GOOGLE_TTS_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          input: { text },
+          voice: {
+            languageCode: "pl-PL",
+            name: "pl-PL-Wavenet-D" // Chirp HD damski
+          },
+          audioConfig: {
+            audioEncoding: "MP3",
+            pitch,
+            speakingRate
+          }
+        })
+      }
+    );
 
-export default async function handler(req, res) {
-  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ TTS API error:', response.status, errorText);
+      return res.status(500).json({ error: "TTS API failed" });
+    }
 
-  try {
-    const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
-    if (!text) return res.status(400).json({ error: "Missing text field" });
+    const result = await response.json();
+    const audioContent = result.audioContent;
+    const buffer = Buffer.from(audioContent, "base64");
 
-    const client = initializeTtsClient();
-
-    const request = {
-      input: { text },
-      voice: { languageCode, name: voice },
-      audioConfig: { audioEncoding: 'MP3' },
-    };
-
-    console.log("🎤 Generating voice for:", text);
-    const [response] = await client.synthesizeSpeech(request);
-
-    if (!response.audioContent) throw new Error("Empty audio content from Google TTS");
-
-    const audioBuffer = Buffer.from(response.audioContent, 'base64');
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', audioBuffer.length);
-    res.status(200).end(audioBuffer);
-
-  } catch (error) {
-    console.error("❌ TTS handler error:", error.message);
-    if (typeof error.stack === 'string') console.error(error.stack);
-
-    res.status(500).json({
-      ok: false,
-      error: 'TTS_ERROR',
-      message: error.message,
-      hint: 'Check Google credentials or API quota'
-    });
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.send(buffer);
+  } catch (e) {
+    console.error("🔥 TTS Error:", e);
+    res.status(500).json({ error: "TTS failed" });
   }
 }

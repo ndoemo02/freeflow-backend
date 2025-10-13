@@ -75,7 +75,6 @@ console.log("✅ FreeFlow Watchdog initialized successfully.\n");
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
-import amberBrain from "./api/brain/amber.js";
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 
@@ -87,7 +86,10 @@ import textToSpeech from "@google-cloud/text-to-speech";
 import { ALLOWED_HEADERS, isAllowedOrigin } from "./api/_cors.js";
 // test-flow.js removed for Vercel compatibility
 
+
 const app = express();
+
+app.use(express.json());
 
 // --- CORS FIX (dla Vercel i lokalnie) ---
 app.use(cors({
@@ -249,7 +251,15 @@ app.post("/api/realtime-freeflow", async (req, res) => {
 });
 
 // FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
-app.post("/api/brain", amberBrain);
+app.post("/api/brain", async (req, res) => {
+  try {
+    const amberBrain = await import('./api/brain/amber.js');
+    return amberBrain.default(req, res);
+  } catch (err) {
+    console.error('Brain endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
 
 // Amber Context endpoint for status tracking
 app.get("/api/brain/context", async (req, res) => {
@@ -696,6 +706,26 @@ app.get("/api/menu/:restaurantId", async (req, res) => {
 });
 
 // === [7] ORDERS ENDPOINT ===
+app.get("/api/orders", async (req, res) => {
+  try {
+    const ordersHandler = await import('./api/orders.js');
+    return ordersHandler.default(req, res);
+  } catch (error) {
+    console.error('❌ Orders GET error:', error);
+    res.status(500).json({ error: 'Orders GET failed' });
+  }
+});
+
+app.delete("/api/orders", async (req, res) => {
+  try {
+    const ordersHandler = await import('./api/orders.js');
+    return ordersHandler.default(req, res);
+  } catch (error) {
+    console.error('❌ Orders DELETE error:', error);
+    res.status(500).json({ error: 'Orders DELETE failed' });
+  }
+});
+
 app.post("/api/orders", async (req, res) => {
   try {
     const { message, restaurant_name, user_email } = req.body;
@@ -779,11 +809,8 @@ app.post("/api/orders", async (req, res) => {
     const orderData = {
       user_id, // Use user_id from Supabase Auth
       restaurant_id: restMatch.id,
-      subtotal_cents: item.price_cents * quantity,
-      total_cents: item.price_cents * quantity,
+      total_price: (item.price_cents || 2500) * quantity, // Fallback: 25 zł
       status: "pending",
-      delivery: true,
-      eta: "15–20 min"
     };
     
     console.log("📝 Dane zamówienia:", orderData);

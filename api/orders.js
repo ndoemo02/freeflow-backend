@@ -68,7 +68,50 @@ function findBestMatch(list, query, field = "name") {
 export default async function handler(req, res) {
   if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
-  try {
+  // GET - pobierz zamówienia
+  if (req.method === 'GET') {
+    try {
+      const { user_email, user_id } = req.query;
+      console.log('📋 Pobieram zamówienia dla:', { user_email, user_id });
+
+      let query = supabase
+        .from('orders')
+        .select(`
+          *,
+          restaurants:restaurant_id (
+            name,
+            address
+          )
+        `)
+        .order('created_at', { ascending: false });
+      
+      // Używamy user_id jeśli dostępny, w przeciwnym razie user_email
+      if (user_id) {
+        query = query.eq('user_id', user_id);
+      } else if (user_email) {
+        // Dla kompatybilności - jeśli nie ma user_id, pobierz wszystkie zamówienia
+        console.log('⚠️ user_email nie jest obsługiwane, pobieram wszystkie zamówienia');
+      }
+
+      const { data: orders, error } = await query;
+      
+      if (error) {
+        console.error('❌ Błąd pobierania zamówień:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      console.log(`✅ Znaleziono ${orders?.length || 0} zamówień`);
+      return res.json({ orders: orders || [] });
+
+    } catch (err) {
+      console.error('🔥 Błąd GET orders:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // POST - utwórz zamówienie
+  if (req.method === 'POST') {
+    try {
     const { message, restaurant_name, user_email } = req.body;
     console.log("🟡 INPUT:", { message, restaurant_name, user_email });
 
@@ -144,8 +187,7 @@ export default async function handler(req, res) {
     // Dodaj zamówienie
     console.log("💾 Tworzę zamówienie w bazie danych...");
     const orderData = {
-      user_id, // Use user_id from Supabase Auth
-      user_email: user_id ? null : user_email, // Fallback to email if no auth
+      user_id: user_id || null, // Use user_id from Supabase Auth
       restaurant_id: restMatch.id, // Use restaurant_id instead of name
       restaurant_name: restMatch.name,
       item_name: item.name,
@@ -170,12 +212,36 @@ export default async function handler(req, res) {
       order_id: order[0]?.id,
     };
     
-    console.log("📤 Odpowiedź:", response);
-    res.json(response);
+      console.log("📤 Odpowiedź:", response);
+      return res.json(response);
 
-  } catch (err) {
-    console.error("🔥 Błąd webhooka:", err);
-    res.status(500).json({ error: err.message });
+    } catch (err) {
+      console.error("🔥 Błąd POST orders:", err);
+      return res.status(500).json({ error: err.message });
+    }
   }
-}
+
+  // DELETE - usuń wszystkie zamówienia (dla testów)
+  if (req.method === 'DELETE') {
+    try {
+      console.log('🗑️ Usuwam wszystkie zamówienia...');
+      
+      const { error } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      
+      if (error) {
+        console.error('❌ Błąd usuwania zamówień:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      console.log('✅ Wszystkie zamówienia usunięte');
+      return res.json({ message: 'All orders deleted successfully' });
+
+    } catch (err) {
+      console.error('🔥 Błąd DELETE orders:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // Method not allowed
+  return res.status(405).json({ error: 'Method not allowed' });
 }
