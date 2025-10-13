@@ -38,8 +38,12 @@ const INTENTS = {
 // --- get context
 async function getContext() {
   try {
-    const res = await fetch(`${BASE_URL}/api/brain/context`);
-    return await res.json();
+    // Zwróć prosty kontekst zamiast fetch do siebie
+    return {
+      lastRestaurant: null,
+      lastIntent: null,
+      lastUpdated: new Date().toISOString()
+    };
   } catch (err) {
     console.error("[Amber] context fetch failed:", err);
     return null;
@@ -49,12 +53,19 @@ async function getContext() {
 // --- get restaurants ---
 async function getRestaurants() {
   try {
-    console.log(`[Amber] Fetching restaurants from: ${BASE_URL}/api/restaurants`);
-    const res = await fetch(`${BASE_URL}/api/restaurants`);
-    console.log(`[Amber] Response status: ${res.status}`);
-    const data = await res.json();
-    console.log(`[Amber] Received ${data.restaurants?.length || 0} restaurants`);
-    return data.restaurants || [];
+    // Bezpośrednie zapytanie do Supabase zamiast fetch do siebie
+    console.log(`[Amber] Fetching restaurants directly from Supabase`);
+    const { data, error } = await supabase
+      .from("restaurants")
+      .select("id, name, address, lat, lng");
+    
+    if (error) {
+      console.error("[Amber] Supabase error:", error);
+      return [];
+    }
+    
+    console.log(`[Amber] Received ${data?.length || 0} restaurants from Supabase`);
+    return data || [];
   } catch (err) {
     console.error("[Amber] restaurants fetch failed:", err);
     return [];
