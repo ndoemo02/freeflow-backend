@@ -1,78 +1,110 @@
+import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import { applyCORS } from './_cors.js';
+
+let ttsClient;
+
+async function initializeTtsClient() {
+  if (ttsClient) return ttsClient;
+
+  try {
+    let credentials;
+
+    // Vercel: użyj GOOGLE_VOICEORDER_KEY_B64
+    if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
+      console.log("✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel)");
+      const decoded = Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf8');
+      credentials = JSON.parse(decoded);
+    }
+    // Lokalnie: użyj GOOGLE_APPLICATION_CREDENTIALS
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS (local)");
+      const fs = await import('fs');
+      const path = await import('path');
+      const credentialsPath = path.resolve(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+      if (fs.existsSync(credentialsPath)) {
+        credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+      } else {
+        throw new Error(`Credentials file not found: ${credentialsPath}`);
+      }
+    }
+    // Fallback: inne zmienne
+    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_JSON");
+      credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
+      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_BASE64");
+      const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
+      credentials = JSON.parse(decoded);
+    } else {
+      console.warn("⚠ No Google credentials found, trying default paths");
+      const fs = await import('fs');
+      const path = await import('path');
+      const defaultPaths = [
+        path.join(process.cwd(), 'FreeFlow.json'),
+        path.join(process.cwd(), 'service-account.json')
+      ];
+      
+      for (const credentialsPath of defaultPaths) {
+        if (fs.existsSync(credentialsPath)) {
+          console.log(`✅ Using default credentials: ${credentialsPath}`);
+          credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+          break;
+        }
+      }
+      
+      if (!credentials) {
+        throw new Error('No Google credentials found in any location');
+      }
+    }
+
+    ttsClient = new TextToSpeechClient({ credentials });
+    return ttsClient;
+  } catch (error) {
+    console.error('❌ Failed to initialize TTS client:', error);
+    throw error;
+  }
+}
 
 export default async function handler(req, res) {
   if (applyCORS(req, res)) return;
 
-  const { text } = req.body;
-  if (!text) return res.status(400).json({ error: 'Missing text' });
-
-  console.log('🔴 Chirp Streaming TTS request:', { text: text.substring(0, 50) + '...' });
-
   try {
-    // Na razie używamy standardowego TTS zamiast WebSocket
-    // (WebSocket wymagałby dodatkowej konfiguracji dla Vercel)
-    
-    let credentials;
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_BASE64");
-      credentials = JSON.parse(
-        Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8')
-      );
-    } else if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
-      console.log("✅ Using GOOGLE_VOICEORDER_KEY_B64");
-      credentials = JSON.parse(
-        Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf8')
-      );
-    } else {
-      throw new Error('No Google credentials found');
-    }
+    const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
+    if (!text) return res.status(400).json({ error: 'Missing text' });
 
-    const endpoint = 'https://texttospeech.googleapis.com/v1beta1/text:synthesize';
+    console.log('🔴 Live Stream TTS request:', { text: text.substring(0, 50) + '...', voice, languageCode });
 
-    const requestBody = {
+    const client = await initializeTtsClient();
+
+    // Google Cloud Text-to-Speech API z parametrami dla live streaming
+    const request = {
       input: { text },
-      voice: { 
-        languageCode: 'pl-PL', 
-        name: 'pl-PL-Studio-B', 
-        model: 'chirp-3-hd' 
+      voice: {
+        languageCode,
+        name: voice, // Używamy standardowego głosu
+        ssmlGender: 'FEMALE'
       },
       audioConfig: {
         audioEncoding: 'MP3',
         speakingRate: 1.1, // Slightly faster for live streaming
         pitch: 0.2, // Slightly higher pitch for live feel
-        volumeGainDb: 2.0, // Louder for live streaming
-        effectsProfileId: ['headphone-class-device'] // Optimized for live streaming
-      },
+        volumeGainDb: 2.0 // Louder for live streaming
+      }
     };
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${credentials.private_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Google TTS API error:', errorText);
-      throw new Error(`TTS API error: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    const audioBuffer = Buffer.from(data.audioContent, 'base64');
+    const [response] = await client.synthesizeSpeech(request);
+    const audioBuffer = Buffer.from(response.audioContent);
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Length', audioBuffer.length);
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-TTS-Mode', 'live-streaming'); // Custom header for live mode
     
-    console.log('✅ Chirp Streaming TTS generated:', audioBuffer.length, 'bytes');
+    console.log('✅ Live Stream TTS generated:', audioBuffer.length, 'bytes');
     res.status(200).end(audioBuffer);
 
   } catch (err) {
-    console.error('❌ Streaming error:', err);
+    console.error('❌ Live Stream TTS error:', err);
     res.status(500).json({ error: err.message });
   }
 }
