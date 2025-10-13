@@ -7,7 +7,20 @@ export default async function handler(req, res) {
   if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
 
   try {
-    const { text, lat, lng } = req.body;
+    const raw = await req.text();
+    let body;
+
+    try {
+      body = JSON.parse(raw);
+    } catch (err) {
+      console.error("Amber Brain: invalid JSON body", raw.slice(0, 200));
+      return res.status(400).json({ ok: false, error: "Invalid JSON input" });
+    }
+
+    // 🔍 Debug log wejścia:
+    console.log("Amber Brain input:", body);
+
+    const { text, lat, lng } = body;
     if (!text) return res.status(400).json({ ok: false, error: 'Missing text' });
 
     const intent = await detectIntent(text);
@@ -73,7 +86,10 @@ export default async function handler(req, res) {
     // 🔹 Fallback neutralny
     return res.json({ ok: true, reply: 'Nie jestem pewna, co masz na myśli — możesz powtórzyć?', intent: 'none' });
   } catch (err) {
-    console.error('Amber Brain error:', err);
-    res.status(500).json({ ok: false, error: err.message });
+    console.error("Amber Brain fatal error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err.message || "Internal server error"
+    });
   }
 }
