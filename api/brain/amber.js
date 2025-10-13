@@ -1,24 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) *
-    Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+// Amber Brain - uses internal API endpoints for restaurant data
 
 export default async function amberBrain(req, res) {
   try {
@@ -29,19 +9,12 @@ export default async function amberBrain(req, res) {
     // 1️⃣ Jeśli mamy współrzędne, używamy ich do dopasowania najbliższych lokali
     let nearby = [];
     if (lat && lng) {
-      const { data, error } = await supabase
-        .from("restaurants")
-        .select("id, name, address, lat, lng");
-
-      if (error) throw error;
-
-      nearby = data
-        .map((r) => ({
-          ...r,
-          distance_km: calculateDistance(lat, lng, r.lat, r.lng),
-        }))
-        .filter((r) => r.distance_km <= 3)
-        .sort((a, b) => a.distance_km - b.distance_km);
+      // ✅ Użyj lokalnego endpointu z filtrowaniem dystansu
+      const nearbyRes = await fetch(
+        `http://localhost:3000/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=3`
+      );
+      const { nearby: nearbyData } = await nearbyRes.json();
+      nearby = nearbyData || [];
     }
 
     // 2️⃣ Tworzymy logiczną odpowiedź
