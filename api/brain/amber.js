@@ -104,15 +104,17 @@ export default async function handler(req, res) {
     if (req.method !== "POST")
       return res.status(405).json({ ok: false, error: "Method not allowed" });
 
-    const body = await req.json?.() ?? req.body;
-    const phrase = body?.text || body?.phrase || "";
-    const lat = body?.lat;
-    const lng = body?.lng;
+          const body = await req.json?.() ?? req.body;
+          const phrase = body?.text || body?.phrase || "";
+          const lat = body?.lat;
+          const lng = body?.lng;
+          const ttsMode = body?.ttsMode || "classic";
 
     console.log("🧠 Amber Brain received:", phrase);
     if (lat && lng) {
       console.log(`📍 Location: ${lat}, ${lng}`);
     }
+    console.log(`🎧 TTS Mode: ${ttsMode}`);
 
     // Użyj zaawansowanego rozpoznawania intencji
     const intentResult = await detectIntent(phrase);
@@ -224,6 +226,7 @@ export default async function handler(req, res) {
       context,
       restaurants: restaurantsList,
       personality: personality.name,
+      ttsMode,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
