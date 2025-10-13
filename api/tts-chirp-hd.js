@@ -22,6 +22,14 @@ async function initializeTtsClient() {
 }
 
 export default async function handler(req, res) {
+  console.log('🔍 TTS Request received:', {
+    method: req.method,
+    url: req.url,
+    headers: req.headers,
+    origin: req.headers.origin,
+    userAgent: req.headers['user-agent']
+  });
+
   if (applyCORS(req, res)) return;
 
   try {

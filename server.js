@@ -237,6 +237,17 @@ app.post("/api/tts-chirp-stream", async (req, res) => {
   }
 });
 
+// OpenAI Realtime endpoint
+app.post("/api/realtime-freeflow", async (req, res) => {
+  try {
+    const realtimeHandler = await import('./api/realtime-freeflow.js');
+    return realtimeHandler.default(req, res);
+  } catch (error) {
+    console.error('❌ OpenAI Realtime error:', error);
+    res.status(500).json({ error: 'OpenAI Realtime failed' });
+  }
+});
+
 // FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
 app.post("/api/brain", amberBrain);
 
