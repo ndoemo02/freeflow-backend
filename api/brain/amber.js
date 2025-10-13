@@ -1,21 +1,24 @@
 // /api/brain/amber.js
 import { supabase } from "../_supabase.js";
 
-// --- helper: base URL ---
 const BASE_URL =
   process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
     : "https://freeflow-backend.vercel.app";
 
-// --- intent keywords ---
 const INTENTS = {
   pizza: "order_pizza",
   kebab: "order_kebab",
   piwo: "order_beer",
+  restauracja: "find_restaurant",
   restauracje: "find_restaurant",
+  knajpa: "find_restaurant",
+  bar: "find_restaurant",
+  jedzenie: "find_restaurant",
+  zjem: "find_restaurant",
 };
 
-// --- context endpoint sync ---
+// --- get context
 async function getContext() {
   try {
     const res = await fetch(`${BASE_URL}/api/brain/context`);
@@ -26,7 +29,19 @@ async function getContext() {
   }
 }
 
-// --- intent detection ---
+// --- get restaurants ---
+async function getRestaurants() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/restaurants`);
+    const data = await res.json();
+    return data.restaurants || [];
+  } catch (err) {
+    console.error("[Amber] restaurants fetch failed:", err);
+    return [];
+  }
+}
+
+// --- detect intent ---
 function detectIntent(text) {
   text = text.toLowerCase();
   for (const [word, intent] of Object.entries(INTENTS)) {
@@ -35,7 +50,7 @@ function detectIntent(text) {
   return "none";
 }
 
-// --- DB logging ---
+// --- log order ---
 async function logOrderToSupabase({ phrase, intent }) {
   try {
     const { data, error } = await supabase
@@ -49,7 +64,6 @@ async function logOrderToSupabase({ phrase, intent }) {
         },
       ])
       .select();
-
     if (error) throw error;
     console.log("[Amber] ✅ Order logged:", data[0]);
     return data[0];
@@ -70,22 +84,33 @@ export default async function handler(req, res) {
 
     console.log("🧠 Amber Brain received:", phrase);
 
-    // --- detect intent ---
     const intent = detectIntent(phrase);
-    console.log("🤖 Intent detected:", intent);
+    console.log("🤖 Detected intent:", intent);
 
-    // --- context sync ---
     const context = await getContext();
-    console.log("📡 Context:", context);
 
     let reply = "Nie jestem pewna, co masz na myśli — możesz powtórzyć?";
-    if (intent === "order_pizza") reply = "Zamawiam pizzę — proszę potwierdzić rodzaj.";
-    if (intent === "order_beer") reply = "Dwa piwa? Świetny wybór, zamówienie zapisane!";
-    if (intent === "find_restaurant") reply = "Już szukam restauracji w okolicy 🍽️";
+    let restaurantsList = [];
 
-    // --- optional DB log ---
+    // --- RESTAURANT FLOW ---
+    if (intent === "find_restaurant") {
+      restaurantsList = await getRestaurants();
+      if (restaurantsList.length > 0) {
+        const random = restaurantsList
+          .sort(() => 0.5 - Math.random())
+          .slice(0, 3)
+          .map(r => r.name)
+          .join(", ");
+        reply = `W pobliżu możesz zjeść w: ${random}.`;
+      } else {
+        reply = "Nie znalazłam żadnych restauracji w pobliżu.";
+      }
+    }
+
+    // --- ORDER FLOW ---
     if (intent.startsWith("order_")) {
       await logOrderToSupabase({ phrase, intent });
+      reply = `Zapisuję zamówienie: ${phrase}`;
     }
 
     return res.status(200).json({
@@ -93,6 +118,7 @@ export default async function handler(req, res) {
       reply,
       intent,
       context,
+      restaurants: restaurantsList,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
