@@ -1,5 +1,18 @@
 // Amber Brain - uses internal API endpoints for restaurant data
 
+const formatDistance = (distKm) => {
+  if (distKm < 0.1) {
+    // mniej niż 100 m
+    return `${Math.round(distKm * 1000)} metrów`;
+  } else if (distKm < 1) {
+    // np. 0.25 km → "250 metrów"
+    return `${Math.round(distKm * 1000)} metrów`;
+  } else {
+    // np. 1.5 km → "1.5 kilometra"
+    return `${distKm.toFixed(1)} kilometra`;
+  }
+};
+
 export default async function amberBrain(req, res) {
   try {
     const { text, lat, lng } = req.body;
@@ -20,15 +33,15 @@ export default async function amberBrain(req, res) {
     // 2️⃣ Tworzymy logiczną odpowiedź
     let reply = "Nie mam danych o restauracjach w pobliżu.";
     if (nearby && nearby.length > 0) {
-      const lines = nearby
+      const listText = nearby
         .slice(0, 5)
         .map(
           (r, i) =>
-            `${i + 1}. ${r.name} (${r.distance_km.toFixed(2)} km, ${r.address})`
+            `${i + 1}. ${r.name} (${formatDistance(r.distance_km)}, ${r.address})`
         )
         .join("\n");
 
-      reply = `Oto restauracje w promieniu 2 kilometrów:\n${lines}\nKtórą chcesz wybrać?`;
+      reply = `Oto restauracje w promieniu 2 kilometrów:\n${listText}\nKtórą chcesz wybrać?`;
     }
 
     console.log("🧠 Amber response:", reply);
