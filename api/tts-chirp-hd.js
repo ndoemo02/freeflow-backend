@@ -74,6 +74,11 @@ export default async function handler(req, res) {
     res.status(200).end(audioBuffer);
   } catch (err) {
     console.error('❌ Chirp HD Error:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      stack: err.stack,
+      name: err.name
+    });
     res.status(500).json({ ok: false, error: err.message });
   }
 }
