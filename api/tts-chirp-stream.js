@@ -1,22 +1,33 @@
-import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import { applyCORS } from './_cors.js';
+import WebSocket from 'ws';
+import { Buffer } from 'buffer';
+import crypto from 'crypto';
 
-let ttsClient;
+export const config = { api: { bodyParser: false } };
 
-async function initializeTtsClient() {
-  if (ttsClient) return ttsClient;
+export default async function handler(req, res) {
+  if (applyCORS(req, res)) return;
 
   try {
-    let credentials;
+    const body = await new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', (chunk) => (data += chunk));
+      req.on('end', () => resolve(JSON.parse(data || '{}')));
+      req.on('error', reject);
+    });
 
-    // Vercel: użyj GOOGLE_VOICEORDER_KEY_B64
+    const { text, languageCode = 'pl-PL' } = body;
+    if (!text) return res.status(400).json({ error: 'Missing text field' });
+
+    console.log('🔴 Live Stream TTS request:', { text: text.substring(0, 50) + '...', languageCode });
+
+    // Użyj Google Cloud credentials do generowania access token
+    let credentials;
     if (process.env.GOOGLE_VOICEORDER_KEY_B64) {
       console.log("✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel)");
       const decoded = Buffer.from(process.env.GOOGLE_VOICEORDER_KEY_B64, 'base64').toString('utf8');
       credentials = JSON.parse(decoded);
-    }
-    // Lokalnie: użyj GOOGLE_APPLICATION_CREDENTIALS
-    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS (local)");
       const fs = await import('fs');
       const path = await import('path');
@@ -26,85 +37,110 @@ async function initializeTtsClient() {
       } else {
         throw new Error(`Credentials file not found: ${credentialsPath}`);
       }
-    }
-    // Fallback: inne zmienne
-    else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_JSON");
-      credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64) {
-      console.log("✅ Using GOOGLE_APPLICATION_CREDENTIALS_BASE64");
-      const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_BASE64, 'base64').toString('utf8');
-      credentials = JSON.parse(decoded);
     } else {
-      console.warn("⚠ No Google credentials found, trying default paths");
-      const fs = await import('fs');
-      const path = await import('path');
-      const defaultPaths = [
-        path.join(process.cwd(), 'FreeFlow.json'),
-        path.join(process.cwd(), 'service-account.json')
-      ];
-      
-      for (const credentialsPath of defaultPaths) {
-        if (fs.existsSync(credentialsPath)) {
-          console.log(`✅ Using default credentials: ${credentialsPath}`);
-          credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-          break;
-        }
-      }
-      
-      if (!credentials) {
-        throw new Error('No Google credentials found in any location');
-      }
+      throw new Error('No Google credentials found');
     }
 
-    ttsClient = new TextToSpeechClient({ credentials });
-    return ttsClient;
-  } catch (error) {
-    console.error('❌ Failed to initialize TTS client:', error);
-    throw error;
+    // Generuj access token
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: createJWT(credentials)
+      })
+    });
+
+    const tokenData = await tokenResponse.json();
+    if (!tokenData.access_token) {
+      throw new Error('Failed to get access token');
+    }
+
+    const ws = new WebSocket(
+      'wss://texttospeech.googleapis.com/v1beta1/text:streamingSynthesize',
+      {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+
+    res.writeHead(200, {
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-cache',
+      'Transfer-Encoding': 'chunked',
+      'X-TTS-Mode': 'live-streaming'
+    });
+
+    ws.on('open', () => {
+      console.log('🔴 WebSocket connected for streaming TTS');
+      ws.send(
+        JSON.stringify({
+          streamingConfig: {
+            voice: {
+              languageCode,
+              name: 'pl-PL-Studio-B',
+              model: 'chirp-3-hd',
+            },
+            audioConfig: {
+              audioEncoding: 'MP3',
+              speakingRate: 1.1,
+              pitch: 0.2,
+              volumeGainDb: 2.0,
+            },
+          },
+          input: { text },
+        })
+      );
+    });
+
+    ws.on('message', (message) => {
+      const msg = JSON.parse(message.toString());
+      if (msg.audioContent) {
+        const chunk = Buffer.from(msg.audioContent, 'base64');
+        res.write(chunk);
+      }
+    });
+
+    ws.on('close', () => {
+      console.log('✅ Live Stream TTS completed');
+      res.end();
+    });
+
+    ws.on('error', (err) => {
+      console.error('❌ WebSocket error:', err);
+      res.end();
+    });
+
+  } catch (err) {
+    console.error('❌ Streaming Chirp error:', err);
+    res.status(500).json({ error: err.message });
   }
 }
 
-export default async function handler(req, res) {
-  if (applyCORS(req, res)) return;
+// Funkcja do tworzenia JWT dla Google OAuth
+function createJWT(credentials) {
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT'
+  };
 
-  try {
-    const { text, languageCode = 'pl-PL', voice = 'pl-PL-Standard-A' } = req.body;
-    if (!text) return res.status(400).json({ error: 'Missing text' });
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: credentials.client_email,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600
+  };
 
-    console.log('🔴 Live Stream TTS request:', { text: text.substring(0, 50) + '...', voice, languageCode });
-
-    const client = await initializeTtsClient();
-
-    // Google Cloud Text-to-Speech API z parametrami dla live streaming
-    const request = {
-      input: { text },
-      voice: {
-        languageCode,
-        name: voice, // Używamy standardowego głosu
-        ssmlGender: 'FEMALE'
-      },
-      audioConfig: {
-        audioEncoding: 'MP3',
-        speakingRate: 1.1, // Slightly faster for live streaming
-        pitch: 0.2, // Slightly higher pitch for live feel
-        volumeGainDb: 2.0 // Louder for live streaming
-      }
-    };
-
-    const [response] = await client.synthesizeSpeech(request);
-    const audioBuffer = Buffer.from(response.audioContent);
-
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Length', audioBuffer.length);
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('X-TTS-Mode', 'live-streaming'); // Custom header for live mode
-    
-    console.log('✅ Live Stream TTS generated:', audioBuffer.length, 'bytes');
-    res.status(200).end(audioBuffer);
-
-  } catch (err) {
-    console.error('❌ Live Stream TTS error:', err);
-    res.status(500).json({ error: err.message });
-  }
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(`${encodedHeader}.${encodedPayload}`);
+  const signature = sign.sign(credentials.private_key, 'base64url');
+  
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
 }
