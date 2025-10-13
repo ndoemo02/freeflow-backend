@@ -60,29 +60,49 @@ export default async function handler(req, res) {
         return res.json({ ok: false, reply: 'Nie znam Twojej lokalizacji. Powiedz, gdzie jesteś.' });
       }
 
-      const baseUrl = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : "http://localhost:3000";
+      const baseUrl =
+        process.env.VERCEL_URL
+          ? `https://${process.env.VERCEL_URL}`
+          : "https://freeflow-backend.vercel.app"; // fallback na produkcję
 
-      const nearbyUrl = `${baseUrl}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`;
-      const nearbyRes = await fetch(nearbyUrl);
-      const { nearby } = await nearbyRes.json();
+      try {
+        const response = await fetch(`${baseUrl}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+        });
 
-      if (!nearby?.length) {
-        return res.json({ ok: true, reply: 'Nie znalazłam żadnych restauracji w pobliżu.', intent: 'find_nearby' });
+        // 🔒 Sprawdź czy nie zwróciło HTML błędu
+        const contentType = response.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          const html = await response.text();
+          throw new Error(`Invalid JSON response: ${html.slice(0, 100)}...`);
+        }
+
+        const data = await response.json();
+        const { nearby } = data;
+
+        if (!nearby?.length) {
+          return res.json({ ok: true, reply: 'Nie znalazłam żadnych restauracji w pobliżu.', intent: 'find_nearby' });
+        }
+
+        const formatted = nearby
+          .slice(0, 5)
+          .map((r, i) => {
+            const dist = r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)} metrów` : `${r.distance_km.toFixed(1)} km`;
+            return `${i + 1}. ${r.name} (${dist}, ${r.address})`;
+          })
+          .join('\n');
+
+        const reply = `Oto restauracje w promieniu 2 kilometrów:\n${formatted}\nKtórą chcesz wybrać?`;
+        saveContext('find_nearby');
+        return res.json({ ok: true, reply, count: nearby.length, intent: 'find_nearby' });
+      } catch (err) {
+        console.error("Amber Brain fatal error:", err);
+        return res.status(500).json({
+          ok: false,
+          error: err.message || "Unexpected response from context fetch",
+        });
       }
-
-      const formatted = nearby
-        .slice(0, 5)
-        .map((r, i) => {
-          const dist = r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)} metrów` : `${r.distance_km.toFixed(1)} km`;
-          return `${i + 1}. ${r.name} (${dist}, ${r.address})`;
-        })
-        .join('\n');
-
-      const reply = `Oto restauracje w promieniu 2 kilometrów:\n${formatted}\nKtórą chcesz wybrać?`;
-      saveContext('find_nearby');
-      return res.json({ ok: true, reply, count: nearby.length, intent: 'find_nearby' });
     }
 
     // 🔹 Zmiana tematu (np. lody, hotel, taxi)
