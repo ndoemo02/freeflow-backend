@@ -213,6 +213,27 @@ app.post("/api/tts", async (req, res) => {
 // FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
 app.post("/api/brain", amberBrain);
 
+// Amber Context endpoint for status tracking
+app.get("/api/brain/context", async (req, res) => {
+  try {
+    const contextHandler = await import('./api/brain/context.js');
+    return contextHandler.default(req, res);
+  } catch (err) {
+    console.error('Context endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/brain/context", async (req, res) => {
+  try {
+    const contextHandler = await import('./api/brain/context.js');
+    return contextHandler.default(req, res);
+  } catch (err) {
+    console.error('Context endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Debug Session endpoint
 app.get("/api/debug-session", async (req, res) => {
   // Set CORS headers
