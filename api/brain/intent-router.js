@@ -1,11 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
-dotenv.config();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { supabase } from '../../lib/supabaseClient.js';
 
 function normalize(text) {
   return text.toLowerCase().replace(/[^a-ząćęłńóśźż0-9 ]/g, '').trim();

@@ -1,14 +1,7 @@
 import { detectIntent } from './intent-router.js';
 import { saveContext, getContext, clearContext } from './memory.js';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../../lib/supabaseClient.js';
 import { applyCORS } from '../_cors.js';
-import dotenv from 'dotenv';
-dotenv.config();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 export default async function handler(req, res) {
   if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight

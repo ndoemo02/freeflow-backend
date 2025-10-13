@@ -1,12 +1,11 @@
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabaseClient.js';
 import { applyCORS } from './_cors.js';
 
 // Initialize clients
 let ttsClient;
 let openaiClient;
-let supabaseClient;
 
 // Initialize OpenAI client
 function initializeOpenAI() {
@@ -25,23 +24,7 @@ function initializeOpenAI() {
   return openaiClient;
 }
 
-// Initialize Supabase client
-function initializeSupabase() {
-  if (supabaseClient) return supabaseClient;
-  
-  try {
-    supabaseClient = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_KEY
-    );
-    console.log('✅ Supabase client initialized');
-  } catch (error) {
-    console.error('❌ Supabase initialization error:', error);
-    throw error;
-  }
-  
-  return supabaseClient;
-}
+// Supabase client is now imported from central location
 
 function initializeTtsClient() {
   if (ttsClient) return ttsClient;
@@ -73,7 +56,7 @@ function initializeTtsClient() {
 // Supabase helper functions
 async function getRestaurants() {
   try {
-    const supabase = initializeSupabase();
+    // supabase is now imported from central location
     const { data, error } = await supabase.from('restaurants').select('*');
     if (error) throw error;
     return data || [];
@@ -85,7 +68,7 @@ async function getRestaurants() {
 
 async function getMenuItems(restaurantId) {
   try {
-    const supabase = initializeSupabase();
+    // supabase is now imported from central location
     const { data, error } = await supabase
       .from('menu_items')
       .select('*')
@@ -100,7 +83,7 @@ async function getMenuItems(restaurantId) {
 
 async function createOrder(orderData) {
   try {
-    const supabase = initializeSupabase();
+    // supabase is now imported from central location
     const { data, error } = await supabase
       .from('orders')
       .insert([orderData])
@@ -115,7 +98,7 @@ async function createOrder(orderData) {
 
 async function getUserOrders(userEmail) {
   try {
-    const supabase = initializeSupabase();
+    // supabase is now imported from central location
     const { data, error } = await supabase
       .from('orders')
       .select('*')

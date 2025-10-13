@@ -1,7 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "../lib/supabaseClient.js";
 import { applyCORS } from "./_cors.js";
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 function normalize(text) {
   return text

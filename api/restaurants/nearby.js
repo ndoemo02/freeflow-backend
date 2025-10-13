@@ -1,15 +1,7 @@
 import express from "express";
-import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
-
-dotenv.config();
+import { supabase } from "../../lib/supabaseClient.js";
 
 const router = express.Router();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // Funkcja licząca dystans między punktami (Haversine formula)
 function calculateDistance(lat1, lon1, lat2, lon2) {
