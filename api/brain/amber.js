@@ -1,15 +1,21 @@
 // Amber Brain - uses internal API endpoints for restaurant data
 
+// --- NATURALNE FORMATOWANIE DYSTANSU ---
 const formatDistance = (distKm) => {
-  if (distKm < 0.1) {
-    // mniej niż 100 m
-    return `${Math.round(distKm * 1000)} metrów`;
-  } else if (distKm < 1) {
-    // np. 0.25 km → "250 metrów"
-    return `${Math.round(distKm * 1000)} metrów`;
+  const distMeters = distKm * 1000;
+
+  if (distMeters < 100) {
+    return `${Math.round(distMeters)} metrów`; // np. 72 m
+  } else if (distMeters < 500) {
+    return `${Math.round(distMeters / 10) * 10} metrów`; // zaokrąglenie do 10 m
+  } else if (distMeters < 1000) {
+    return `${Math.round(distMeters / 10) * 10} metrów`; // np. 720 m
+  } else if (distMeters < 2000) {
+    const km = (distMeters / 1000).toFixed(1).replace('.', ',');
+    return `${km} kilometra`; // np. 1,2 kilometra
   } else {
-    // np. 1.5 km → "1.5 kilometra"
-    return `${distKm.toFixed(1)} kilometra`;
+    const km = Math.round(distMeters / 1000);
+    return `${km} kilometrów`; // np. 2 km
   }
 };
 
@@ -33,6 +39,7 @@ export default async function amberBrain(req, res) {
     // 2️⃣ Tworzymy logiczną odpowiedź
     let reply = "Nie mam danych o restauracjach w pobliżu.";
     if (nearby && nearby.length > 0) {
+      // --- GENEROWANIE LISTY ---
       const listText = nearby
         .slice(0, 5)
         .map(
