@@ -8,10 +8,7 @@ const supabase = createClient(
 );
 
 function normalize(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-ząćęłńóśźż0-9 ]/g, '')
-    .trim();
+  return text.toLowerCase().replace(/[^a-ząćęłńóśźż0-9 ]/g, '').trim();
 }
 
 function fuzzyMatch(a, b) {
@@ -20,7 +17,6 @@ function fuzzyMatch(a, b) {
   b = normalize(b);
   if (a === b) return true;
   if (a.includes(b) || b.includes(a)) return true;
-  // Minimalne dopasowanie (Levenshtein)
   const dist = levenshtein(a, b);
   return dist <= 2;
 }
@@ -48,24 +44,54 @@ function levenshtein(a, b) {
 export async function detectIntent(text) {
   if (!text) return { intent: 'none', restaurant: null };
 
+  const lower = normalize(text);
   const { data: restaurants } = await supabase
     .from('restaurants')
     .select('id, name, address, lat, lng');
 
-  const lower = normalize(text);
-
   const matched = restaurants?.find(r => fuzzyMatch(lower, r.name));
-
   if (matched) {
-    return {
-      intent: 'select_restaurant',
-      restaurant: matched,
-    };
+    return { intent: 'select_restaurant', restaurant: matched };
   }
 
-  if (lower.includes('zjeść') || lower.includes('restaurac') || lower.includes('pizza')) {
+  const findNearbyKeywords = [
+    'zjeść', 'restaurac', 'pizza', 'kebab', 'burger', 'zjeść coś', 'gdzie',
+    'w okolicy', 'blisko', 'zamówić', 'coś do jedzenia', 'posiłek', 'obiad',
+    'gdzie zjem', 'co polecasz'
+  ];
+
+  const { data: learned } = await supabase
+    .from('phrases')
+    .select('text, intent');
+
+  const learnedNearby = learned?.filter(p => p.intent === 'find_nearby') || [];
+  const dynamicKeywords = learnedNearby.map(p => normalize(p.text));
+  const allKeywords = [...findNearbyKeywords, ...dynamicKeywords];
+
+  if (allKeywords.some(k => lower.includes(k))) {
     return { intent: 'find_nearby', restaurant: null };
   }
 
+  // Jeśli Amber nie zna frazy — zapisuje ją do bazy do przyszłego uczenia
+  try {
+    await supabase.from('phrases').insert({ text: text, intent: 'none' });
+  } catch (err) {
+    console.warn('Phrase insert skipped:', err.message);
+  }
+
   return { intent: 'none', restaurant: null };
+}
+
+export async function trainIntent(phrase, correctIntent) {
+  const normalized = normalize(phrase);
+  const { data: existing } = await supabase
+    .from('phrases')
+    .select('id, text, intent');
+
+  const already = existing?.find(p => fuzzyMatch(normalized, p.text));
+  if (already) {
+    await supabase.from('phrases').update({ intent: correctIntent }).eq('id', already.id);
+  } else {
+    await supabase.from('phrases').insert({ text: phrase, intent: correctIntent });
+  }
 }

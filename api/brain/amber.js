@@ -10,14 +10,23 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   try {
-    const { text } = req.body;
+    const { text, lat, lng } = req.body;
     if (!text) return res.status(400).json({ ok: false, error: 'Missing text' });
 
     const intent = await detectIntent(text);
     const context = getContext();
 
-    // 🔹 Użytkownik mówi: 'pokaż menu' albo 'co mają do jedzenia'
+    // 🔹 Pokaż menu z kontekstu
     if (/(menu|co mają|zobaczyć menu|co zjeść)/i.test(text)) {
       if (context.lastRestaurant) {
         const r = context.lastRestaurant;
@@ -29,7 +38,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 🔹 Intencja: wybrano konkretną restaurację
+    // 🔹 Wybrano konkretną restaurację
     if (intent.intent === 'select_restaurant' && intent.restaurant) {
       const r = intent.restaurant;
       const reply = `Świetny wybór! ${r.name} znajduje się przy ${r.address}. Chcesz zobaczyć menu?`;
@@ -37,22 +46,34 @@ export default async function handler(req, res) {
       return res.json({ ok: true, reply, restaurant: r, intent: 'select_restaurant' });
     }
 
-    // 🔹 Intencja: szukanie restauracji
+    // 🔹 Szukanie restauracji z odległością
     if (intent.intent === 'find_nearby') {
-      const { data: restaurants } = await supabase.from('restaurants').select('*');
-      if (!restaurants?.length) return res.json({ ok: false, reply: 'Nie znalazłam restauracji w bazie.' });
+      if (!lat || !lng) {
+        return res.json({ ok: false, reply: 'Nie znam Twojej lokalizacji. Powiedz, gdzie jesteś.' });
+      }
 
-      const list = restaurants
+      const nearbyUrl = `${process.env.BASE_URL || 'http://localhost:3000'}/api/restaurants/nearby?lat=${lat}&lng=${lng}&radius=2`;
+      const nearbyRes = await fetch(nearbyUrl);
+      const { nearby } = await nearbyRes.json();
+
+      if (!nearby?.length) {
+        return res.json({ ok: true, reply: 'Nie znalazłam żadnych restauracji w pobliżu.', intent: 'find_nearby' });
+      }
+
+      const formatted = nearby
         .slice(0, 5)
-        .map((r, i) => `${i + 1}. ${r.name} (${r.address})`)
+        .map((r, i) => {
+          const dist = r.distance_km < 1 ? `${Math.round(r.distance_km * 1000)} metrów` : `${r.distance_km.toFixed(1)} km`;
+          return `${i + 1}. ${r.name} (${dist}, ${r.address})`;
+        })
         .join('\n');
 
-      const reply = `Oto restauracje w promieniu 2 kilometrów:\n${list}\nKtórą chcesz wybrać?`;
+      const reply = `Oto restauracje w promieniu 2 kilometrów:\n${formatted}\nKtórą chcesz wybrać?`;
       saveContext('find_nearby');
-      return res.json({ ok: true, reply, count: restaurants.length, intent: 'find_nearby' });
+      return res.json({ ok: true, reply, count: nearby.length, intent: 'find_nearby' });
     }
 
-    // 🔹 Użytkownik zmienia temat – np. mówi o lodach, hotelu, taksówce
+    // 🔹 Zmiana tematu (np. lody, hotel, taxi)
     if (/(lody|hotel|taxi|przewóz|nocleg)/i.test(text)) {
       clearContext();
       return res.json({ ok: true, reply: 'Okej! Zmieniam temat. Powiedz, czego potrzebujesz teraz.', intent: 'topic_change' });

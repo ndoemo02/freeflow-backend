@@ -86,17 +86,24 @@ import textToSpeech from "@google-cloud/text-to-speech";
 
 const app = express();
 
-// CORS configuration
+// --- CORS FIX (dla Vercel i lokalnie) ---
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://freeflow-frontend-seven.vercel.app"
+];
+
 app.use(cors({
-  origin: [
-    'https://freeflow-frontend-seven.vercel.app',
-    'https://freeflow-frontend.vercel.app', 
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173'
-  ],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  origin: function (origin, callback) {
+    // Pozwala na brak nagłówka origin przy testach np. z Postmana
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    console.warn(`🚨 CORS blocked origin: ${origin}`);
+    return callback(new Error("CORS policy violation"), false);
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: false,
   optionsSuccessStatus: 200
 }));
@@ -230,6 +237,24 @@ app.post("/api/brain/context", async (req, res) => {
     return contextHandler.default(req, res);
   } catch (err) {
     console.error('Context endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Amber Training endpoint
+app.post("/api/brain/train", async (req, res) => {
+  try {
+    const { phrase, intent } = req.body;
+    if (!phrase || !intent) {
+      return res.status(400).json({ ok: false, error: 'Missing phrase or intent' });
+    }
+    
+    const { trainIntent } = await import('./api/brain/intent-router.js');
+    await trainIntent(phrase, intent);
+    
+    res.json({ ok: true, message: 'Amber trained successfully' });
+  } catch (err) {
+    console.error('Training error:', err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
