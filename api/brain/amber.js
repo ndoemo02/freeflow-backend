@@ -1,6 +1,6 @@
 import { detectIntent } from './intent-router.js';
 import { saveContext, getContext, clearContext } from './memory.js';
-import { supabase } from '../../lib/supabaseClient.js';
+import { supabase } from './supabaseClient.js';
 import { applyCORS } from '../_cors.js';
 
 export default async function handler(req, res) {

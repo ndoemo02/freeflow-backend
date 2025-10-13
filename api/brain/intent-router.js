@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabaseClient.js';
+import { supabase } from './supabaseClient.js';
 
 function normalize(text) {
   return text.toLowerCase().replace(/[^a-ząćęłńóśźż0-9 ]/g, '').trim();

@@ -1,6 +1,6 @@
 import { TextToSpeechClient } from '@google-cloud/text-to-speech';
 import OpenAI from 'openai';
-import { supabase } from '../lib/supabaseClient.js';
+import { supabase } from './brain/supabaseClient.js';
 import { applyCORS } from './_cors.js';
 
 // Initialize clients
