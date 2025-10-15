@@ -1,4 +1,5 @@
 import { supabase } from '../_supabase.js';
+import { createOrder } from '../orders.js';
 
 function normalize(text) {
   return text.toLowerCase().replace(/[^a-ząćęłńóśźż0-9 ]/g, '').trim();
@@ -58,18 +59,31 @@ export async function detectIntent(text) {
     'dania', 'potrawy', 'co serwują', 'co podają', 'karta dań'
   ];
 
+  const orderKeywords = [
+    'zamów', 'poproszę', 'chcę zamówić', 'złóż zamówienie', 'zamówić coś',
+    'dodaj do zamówienia', 'złóż', 'zamówić'
+  ];
+
   const { data: learned } = await supabase
     .from('phrases')
     .select('text, intent');
 
   const learnedNearby = learned?.filter(p => p.intent === 'find_nearby') || [];
   const learnedMenu = learned?.filter(p => p.intent === 'menu_request') || [];
+  const learnedOrder = learned?.filter(p => p.intent === 'create_order') || [];
   
   const dynamicNearbyKeywords = learnedNearby.map(p => normalize(p.text));
   const dynamicMenuKeywords = learnedMenu.map(p => normalize(p.text));
+  const dynamicOrderKeywords = learnedOrder.map(p => normalize(p.text));
   
   const allNearbyKeywords = [...findNearbyKeywords, ...dynamicNearbyKeywords];
   const allMenuKeywords = [...menuKeywords, ...dynamicMenuKeywords];
+  const allOrderKeywords = [...orderKeywords, ...dynamicOrderKeywords];
+
+  // Sprawdź order keywords
+  if (allOrderKeywords.some(k => lower.includes(k))) {
+    return { intent: 'create_order', restaurant: null };
+  }
 
   // Sprawdź menu keywords
   if (allMenuKeywords.some(k => lower.includes(k))) {
@@ -89,6 +103,61 @@ export async function detectIntent(text) {
   }
 
   return { intent: 'none', restaurant: null };
+}
+
+export async function handleIntent(intent, text, session) {
+  switch (intent) {
+    case "create_order": {
+      const restaurant = session?.lastRestaurant;
+      if (!restaurant) {
+        return { reply: "Najpierw wybierz restaurację, zanim złożysz zamówienie." };
+      }
+
+      const order = await createOrder(restaurant.id, session?.userId || "guest");
+      return {
+        reply: `Zamówienie utworzone w ${restaurant.name}. Numer: ${order?.id || "brak danych"}.`,
+        order,
+      };
+    }
+
+    case "menu_request": {
+      const restaurant = session?.lastRestaurant;
+      if (!restaurant) {
+        return { reply: "Najpierw wybierz restaurację, żebym mogła pobrać menu." };
+      }
+
+      const { data: menu, error } = await supabase
+        .from("menu_items")
+        .select("name, price")
+        .eq("restaurant_id", restaurant.id)
+        .limit(6);
+
+      if (error || !menu?.length)
+        return { reply: `Nie udało mi się pobrać menu ${restaurant.name}.` };
+
+      return {
+        reply: `W ${restaurant.name} dostępne: ${menu
+          .map((m) => `${m.name} (${Number(m.price).toFixed(2)} zł)`)
+          .join(", ")}.`,
+      };
+    }
+
+    case "find_nearby": {
+      const { data, error } = await supabase
+        .from("restaurants")
+        .select("name, address, city")
+        .limit(5);
+      if (error || !data?.length) return { reply: "Nie znalazłam restauracji w pobliżu." };
+      return {
+        reply:
+          "W pobliżu możesz zjeść w: " +
+          data.map((r) => `${r.name} (${r.city || r.address})`).join(", "),
+      };
+    }
+
+    default:
+      return { reply: "Nie jestem pewna, co masz na myśli — spróbuj inaczej." };
+  }
 }
 
 export async function trainIntent(phrase, correctIntent) {

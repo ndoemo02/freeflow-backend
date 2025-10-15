@@ -1,36 +1,62 @@
-// api/brain/context.js
-import { getContext, saveContext, clearContext } from './memory.js';
-import { applyCORS } from '../_cors.js';
+// /api/brain/context.js
+// Lekka pamięć sesji Amber (tylko w RAM, brak profilowania)
+
+const sessions = new Map(); // key = sessionId, value = kontekst rozmowy
 
 export default async function handler(req, res) {
-  if (applyCORS(req, res)) return; // 👈 ważne: obsługuje preflight
-
   try {
-    if (req.method === 'GET') {
-      const context = getContext();
-      return res.status(200).json({
-        ok: true,
-        lastRestaurant: context.lastRestaurant,
-        lastIntent: context.lastIntent,
-        lastUpdated: context.lastUpdated,
-        timestamp: new Date().toISOString()
-      });
+    const body = await req.json?.() || req.body || {};
+    const { sessionId, tone, intent, restaurant, items } = body;
+
+    if (!sessionId) {
+      return res.status(400).json({ ok: false, error: "missing_sessionId" });
     }
 
-    if (req.method === 'POST') {
-      const { intent, restaurant } = req.body;
-      if (intent === 'clear') {
-        clearContext();
-        return res.status(200).json({ ok: true, message: 'Context cleared' });
-      } else {
-        saveContext(intent, restaurant);
-        return res.status(200).json({ ok: true, message: 'Context updated' });
+    // 🔹 Pobierz istniejącą sesję
+    const prev = sessions.get(sessionId) || {};
+
+    // 🔹 Zaktualizuj dane kontekstowe
+    const updated = {
+      tone: tone || prev.tone || "neutralny",
+      lastIntent: intent || prev.lastIntent || "unknown",
+      lastRestaurant: restaurant || prev.lastRestaurant || null,
+      lastItems: items?.length ? items : prev.lastItems || [],
+      lastUpdated: Date.now()
+    };
+
+    sessions.set(sessionId, updated);
+
+    // 🔹 Wyczyść nieaktywne sesje (po 30 minutach)
+    for (const [key, data] of sessions.entries()) {
+      if (Date.now() - data.lastUpdated > 30 * 60 * 1000) {
+        sessions.delete(key);
       }
     }
 
-    return res.status(405).json({ ok: false, error: 'Method not allowed' });
+    return res.status(200).json({
+      ok: true,
+      message: "Context updated",
+      session: updated
+    });
   } catch (err) {
-    console.error('Context API error:', err);
+    console.error("MemoryLight error:", err);
     return res.status(500).json({ ok: false, error: err.message });
   }
+}
+
+// Pomocnicza funkcja (opcjonalnie eksportowana do innych modułów)
+export function getSession(sessionId) {
+  return sessions.get(sessionId) || null;
+}
+
+// Funkcja do aktualizacji sesji
+export function updateSession(sessionId, updates) {
+  const current = sessions.get(sessionId) || {};
+  const updated = {
+    ...current,
+    ...updates,
+    lastUpdated: Date.now()
+  };
+  sessions.set(sessionId, updated);
+  return updated;
 }

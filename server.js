@@ -300,6 +300,39 @@ app.post("/api/brain/train", async (req, res) => {
   }
 });
 
+// Brain Router endpoint - nowy zaawansowany system
+app.post("/api/brain/router", async (req, res) => {
+  try {
+    const brainRouter = await import('./api/brain/brainRouter.js');
+    return brainRouter.default(req, res);
+  } catch (err) {
+    console.error('Brain Router endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Stats endpoint - statystyki jakości sesji
+app.get("/api/brain/stats", async (req, res) => {
+  try {
+    const stats = await import('./api/brain/stats.js');
+    return stats.default(req, res);
+  } catch (err) {
+    console.error('Stats endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Create Order endpoint - nowy endpoint dla zamówień
+app.post("/api/orders", async (req, res) => {
+  try {
+    const orders = await import('./api/orders.js');
+    return orders.createOrderEndpoint(req, res);
+  } catch (err) {
+    console.error('Create Order endpoint error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Debug endpoints removed for Vercel compatibility
 
 // Sessions API endpoint

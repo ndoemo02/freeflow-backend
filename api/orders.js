@@ -1,6 +1,40 @@
 import { supabase } from "./_supabase.js";
 import { applyCORS } from "./_cors.js";
 
+// 🛒 Nowy endpoint dla create_order
+export async function createOrderEndpoint(req, res) {
+  if (req.method !== "POST")
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+
+  try {
+    const { restaurant_id, items, sessionId } = req.body;
+
+    if (!restaurant_id || !items?.length)
+      return res.status(400).json({ ok: false, error: "Incomplete order data" });
+
+    const { data, error } = await supabase
+      .from("orders")
+      .insert([
+        {
+          restaurant_id,
+          items,
+          session_id: sessionId,
+          status: "pending",
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.status(200).json({ ok: true, id: data.id, items: data.items });
+  } catch (err) {
+    console.error("❌ Order error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
+
 function normalize(text) {
   return text
     ?.toLowerCase()
@@ -63,6 +97,38 @@ function findBestMatch(list, query, field = "name") {
   }
   
   return result;
+}
+
+// 🛒 Funkcja do tworzenia zamówienia (dla intent-router)
+export async function createOrder(restaurantId, userId = "guest") {
+  try {
+    console.log(`🛒 Tworzę zamówienie dla restauracji ${restaurantId}, użytkownik: ${userId}`);
+    
+    const orderData = {
+      user_id: userId === "guest" ? null : userId,
+      restaurant_id: restaurantId,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+    
+    const { data: order, error } = await supabase
+      .from("orders")
+      .insert([orderData])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error("❌ Błąd tworzenia zamówienia:", error);
+      throw error;
+    }
+    
+    console.log("✅ Zamówienie utworzone:", order?.id);
+    return order;
+    
+  } catch (err) {
+    console.error("🔥 Błąd createOrder:", err);
+    return null;
+  }
 }
 
 export default async function handler(req, res) {
