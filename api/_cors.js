@@ -4,6 +4,7 @@ export const ALLOWED_ORIGINS = [
   "https://freeflow-frontend-seven.vercel.app",
   "https://freeflow-backend.vercel.app",
   "http://localhost:5173",
+  "*", // Allow all origins for testing
 ];
 
 export const ALLOWED_HEADERS = [
