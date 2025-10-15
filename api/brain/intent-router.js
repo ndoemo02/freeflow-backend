@@ -107,6 +107,11 @@ export async function detectIntent(text) {
 
 export async function handleIntent(intent, text, session) {
   switch (intent) {
+    case "select_restaurant": {
+      // Ten case jest obsługiwany w brainRouter.js
+      return { reply: "Restauracja wybrana, przechodzę do brainRouter..." };
+    }
+
     case "create_order": {
       const restaurant = session?.lastRestaurant;
       if (!restaurant) {

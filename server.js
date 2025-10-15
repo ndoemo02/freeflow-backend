@@ -253,8 +253,8 @@ app.post("/api/realtime-freeflow", async (req, res) => {
 // FreeFlow Brain endpoint - now using Amber Brain for location-based recommendations
 app.post("/api/brain", async (req, res) => {
   try {
-    const amberBrain = await import('./api/brain/amber.js');
-    return amberBrain.default(req, res);
+    const brainRouter = await import('./api/brain/brainRouter.js');
+    return brainRouter.default(req, res);
   } catch (err) {
     console.error('Brain endpoint error:', err);
     res.status(500).json({ ok: false, error: err.message });

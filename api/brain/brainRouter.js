@@ -88,7 +88,10 @@ export default async function handler(req, res) {
           }
         }
 
-        if (!verifiedRestaurant) {
+        // Jeśli nie ma nameFromText, użyj lastRestaurant z sesji
+        if (!verifiedRestaurant && !nameFromText) {
+          // Kontynuuj z lastRestaurant z sesji
+        } else if (!verifiedRestaurant && nameFromText) {
           replyCore = `Nie znalazłam restauracji o nazwie "${nameFromText}". Możesz wybrać z tych, które są w pobliżu?`;
           break;
         }
