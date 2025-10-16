@@ -14,3 +14,16 @@ export const supabase = createClient(
   SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY,
   { auth: { persistSession: false } }
 );
+
+// --- Połączenie sanity check ---
+export async function testSupabaseConnection() {
+  try {
+    const { data, error } = await supabase.from("restaurants").select("id").limit(1);
+    if (error) throw error;
+    console.log("✅ Supabase connection OK");
+    return true;
+  } catch (err) {
+    console.error("❌ Supabase connection FAILED:", err.message);
+    return false;
+  }
+}

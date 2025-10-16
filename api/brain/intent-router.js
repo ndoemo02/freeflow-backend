@@ -147,8 +147,19 @@ export async function handleIntent(intent, text, session) {
         .eq("restaurant_id", restaurant.id)
         .limit(6);
 
-      if (error || !menu?.length)
-        return { reply: `Nie udało mi się pobrać menu ${restaurant.name}.` };
+      if (error) {
+        console.error("⚠️ Supabase error in menu_request:", error?.message || "Brak danych");
+        return {
+          ok: false,
+          intent: "menu_request",
+          restaurant,
+          reply: "Nie mogę pobrać danych z bazy. Sprawdź połączenie z serwerem.",
+        };
+      }
+
+      if (!menu?.length) {
+        return { reply: `W bazie nie ma pozycji menu dla ${restaurant.name}.` };
+      }
 
       return {
         reply: `W ${restaurant.name} dostępne: ${menu
@@ -162,7 +173,21 @@ export async function handleIntent(intent, text, session) {
         .from("restaurants")
         .select("name, address, city")
         .limit(5);
-      if (error || !data?.length) return { reply: "Nie znalazłam restauracji w pobliżu." };
+      
+      if (error) {
+        console.error("⚠️ Supabase error in find_nearby:", error?.message || "Brak danych");
+        return {
+          ok: false,
+          intent: "find_nearby",
+          restaurant: null,
+          reply: "Nie mogę pobrać danych z bazy. Sprawdź połączenie z serwerem.",
+        };
+      }
+
+      if (!data?.length) {
+        return { reply: "Nie znalazłam restauracji w pobliżu." };
+      }
+
       return {
         reply:
           "W pobliżu możesz zjeść w: " +

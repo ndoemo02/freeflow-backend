@@ -6,18 +6,29 @@ import dotenv from "dotenv";
 
 // Wymuś absolutną ścieżkę do pliku .env w tym katalogu
 const envPath = path.resolve(process.cwd(), ".env");
+const envLocalPath = path.resolve(process.cwd(), ".env.local");
 
 // Sprawdź, czy plik istnieje i załaduj
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
   console.log("🌍 Loaded .env from:", envPath);
-  console.log("🔑 SUPABASE_URL:", process.env.SUPABASE_URL || "(not found)");
 } else {
   console.warn("⚠️  No .env file found at:", envPath);
 }
 
+// Załaduj .env.local jeśli istnieje
+if (fs.existsSync(envLocalPath)) {
+  dotenv.config({ path: envLocalPath });
+  console.log("🌍 Loaded .env.local from:", envLocalPath);
+} else {
+  console.warn("⚠️  No .env.local file found at:", envLocalPath);
+}
+
+console.log("🔑 SUPABASE_URL:", process.env.SUPABASE_URL || "(not found)");
+
 // ✅ --- FreeFlow Startup Watchdog ---
 import os from "os";
+import { testSupabaseConnection } from "./api/brain/supabaseClient.js";
 import { execSync } from "child_process";
 
 // 🔹 Wczytaj wersję z package.json
@@ -72,6 +83,9 @@ if (!process.env.GOOGLE_TTS_API_KEY) {
 
 console.log("──────────────────────────────────────────────");
 console.log("✅ FreeFlow Watchdog initialized successfully.\n");
+
+// Test Supabase connection
+await testSupabaseConnection();
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";

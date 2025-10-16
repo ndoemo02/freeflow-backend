@@ -18,6 +18,15 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Globalny fallback - sprawdź credentials Supabase
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("🚨 Missing Supabase credentials");
+      return res.status(503).json({
+        ok: false,
+        reply: "Błąd połączenia z bazą danych. Spróbuj ponownie za chwilę.",
+      });
+    }
+
     const body = await req.json?.() || req.body || {};
     const { sessionId = "default", text } = body;
     if (!text) return res.status(400).json({ ok: false, error: "Missing text" });
@@ -48,9 +57,12 @@ export default async function handler(req, res) {
           .select("id,name,address,city")
           .limit(5);
         
+        // Track database connection status
+        updateSession(sessionId, { dbConnected: !error });
+        
         if (error) {
-          console.error("❌ DB error:", error);
-          replyCore = "Mam problem z bazą danych. Spróbuj ponownie za chwilę.";
+          console.error("⚠️ Supabase error in find_nearby:", error?.message || "Brak danych");
+          replyCore = "Nie mogę pobrać danych z bazy. Sprawdź połączenie z serwerem.";
           break;
         }
         
@@ -118,7 +130,14 @@ export default async function handler(req, res) {
           .order("name", { ascending: true })
           .limit(6);
 
-        if (error) { console.error("DB error:", error); replyCore = "Nie mogę teraz pobrać menu."; break; }
+        // Track database connection status
+        updateSession(sessionId, { dbConnected: !error });
+
+        if (error) { 
+          console.error("⚠️ Supabase error in menu_request:", error?.message || "Brak danych"); 
+          replyCore = "Nie mogę pobrać danych z bazy. Sprawdź połączenie z serwerem."; 
+          break; 
+        }
 
         if (!menu?.length) {
           replyCore = `W bazie nie ma pozycji menu dla ${current.name}. Mogę:
@@ -252,7 +271,17 @@ Co wybierasz?`;
       console.warn("⚠️ Headers already sent – watchdog only logged.");
     }
 
-    // 🔹 Krok 5: finalna odpowiedź
+    // 🔹 Krok 5: sprawdź czy baza danych działała
+    if (!reply && /menu|restaurant|order/i.test(intent)) {
+      console.error("⚠️ No database result for intent:", intent);
+      return res.status(200).json({
+        ok: true,
+        intent,
+        reply: "Nie mogę pobrać danych z bazy. Amber potrzebuje połączenia z Supabase.",
+      });
+    }
+
+    // 🔹 Krok 6: finalna odpowiedź
     return res.status(200).json({
       ok: true,
       intent,
