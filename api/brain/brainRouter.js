@@ -75,11 +75,13 @@ export default async function handler(req, res) {
         // ⚠️ Walidacja nazw - tylko jeśli istnieje w bazie
         let verifiedRestaurant = null;
         if (nameFromText) {
-          const { data: found, error } = await supabase
-            .from("restaurants")
-            .select("id,name,city,address")
-            .ilike("name", `%${nameFromText}%`)
-            .limit(3);
+        // Rozluźnienie dopasowań - usuń "w " z początku i dodaj wildcard
+        const cleanName = nameFromText.replace(/^w\s+/, '').trim();
+        const { data: found, error } = await supabase
+          .from("restaurants")
+          .select("id,name,city,address")
+          .ilike("name", `%${cleanName}%`)
+          .limit(3);
 
           if (!error && found?.length > 0) {
             verifiedRestaurant = found[0];
@@ -139,10 +141,12 @@ Co wybierasz?`;
 
         if (!name) { replyCore = "Podaj pełną nazwę restauracji."; break; }
 
+        // Rozluźnienie dopasowań - usuń "w " z początku i dodaj wildcard
+        const cleanName = name.replace(/^w\s+/, '').trim();
         const { data: found, error } = await supabase
           .from("restaurants")
           .select("id,name,address,city")
-          .ilike("name", `%${name}%`);
+          .ilike("name", `%${cleanName}%`);
 
         if (error) { console.error("DB error:", error); replyCore = "Mam problem z bazą."; break; }
 

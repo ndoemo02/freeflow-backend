@@ -38,12 +38,22 @@ function levenshtein(a, b) {
 export async function detectIntent(text) {
   if (!text) return { intent: 'none', restaurant: null };
 
-  const lower = normalize(text);
+  // --- Korekta STT / lokalizacji ---
+  let normalizedText = text.toLowerCase()
+    .replace(/\bsokolica\b/g, "okolicy") // typowa halucynacja STT
+    .replace(/\bw\s*okolice\b/g, "w okolicy") // brak spacji itp.
+    .replace(/\bw\s*okolicach\b/g, "w okolicy")
+    .replace(/\bpizzeriach\b/g, "pizzerie") // dopasowanie intencji
+    .trim();
+
+  const lower = normalize(normalizedText);
   const { data: restaurants } = await supabase
     .from('restaurants')
     .select('id, name, address, lat, lng');
 
-  const matched = restaurants?.find(r => fuzzyMatch(lower, r.name));
+  // Rozluźnienie dopasowań - usuń "w " z początku
+  const cleanText = lower.replace(/^w\s+/, '').trim();
+  const matched = restaurants?.find(r => fuzzyMatch(cleanText, r.name));
   if (matched) {
     return { intent: 'select_restaurant', restaurant: matched };
   }
