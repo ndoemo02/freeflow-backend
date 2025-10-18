@@ -3,13 +3,23 @@
   "version": "1.4.2",
   "private": true,
   "type": "module",
-  "main": "server.js",
+  "main": "api/server-vercel.js",
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "vercel-build": "echo 'no build required'",
+    "vercel-build": "echo 'Using server-vercel.js handler'",
     "postpatch": "node dev-tools/postpatch.cjs",
-    "log": "node -e \"import('./dev-tools/patchLogger.js').then(m => m.logCursorPatch('Manual log', process.argv[1]))\""
+    "log": "node -e \"import('./dev-tools/patchLogger.js').then(m => m.logCursorPatch('Manual log', process.argv[1]))\"",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "test:performance": "vitest run tests/performance",
+    "test:parse": "node tests/test-parse.js",
+    "test:brain": "node run-brain-tests.js"
   },
   "dependencies": {
     "@google-cloud/speech": "^6.0.0",
@@ -25,6 +35,9 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "@vitest/coverage-v8": "^1.0.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^6.3.0",
+    "vitest": "^1.0.0"
   }
 }

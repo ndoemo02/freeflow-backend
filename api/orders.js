@@ -7,7 +7,16 @@ export async function createOrderEndpoint(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
 
   try {
-    const { restaurant_id, items, sessionId } = req.body;
+    let { restaurant_id, items, sessionId } = req.body;
+    
+    // Bezpieczny fallback dla items (string vs array)
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        items = [];
+      }
+    }
 
     if (!restaurant_id || !items?.length)
       return res.status(400).json({ ok: false, error: "Incomplete order data" });
@@ -178,7 +187,13 @@ export default async function handler(req, res) {
   // POST - utwórz zamówienie
   if (req.method === 'POST') {
     try {
-    const { message, restaurant_name, user_email } = req.body;
+    let { message, restaurant_name, user_email } = req.body;
+    
+    // Bezpieczny fallback dla undefined values
+    message = message || "";
+    restaurant_name = restaurant_name || "";
+    user_email = user_email || "";
+    
     console.log("🟡 INPUT:", { message, restaurant_name, user_email });
 
     // Get user_id from Supabase Auth if available

@@ -1,8 +1,152 @@
 import { supabase } from '../_supabase.js';
 import { createOrder } from '../orders.js';
+import { updateDebugSession } from '../debug.js';
 
-function normalize(text) {
-  return text.toLowerCase().replace(/[^a-ząćęłńóśźż0-9 ]/g, '').trim();
+// ——— Utils: Import from helpers ———
+import {
+  normalize,
+  stripDiacritics,
+  normalizeTxt,
+  extractQuantity,
+  extractSize,
+  fuzzyIncludes as fuzzyIncludesHelper,
+  levenshtein as levenshteinHelper
+} from './helpers.js';
+
+// Re-export for compatibility
+export { normalize, stripDiacritics, normalizeTxt, extractQuantity, extractSize };
+
+function nameHasSize(name, size) {
+  if (!size) return false;
+  const n = normalizeTxt(name);
+  return n.includes(String(size)) || (
+    size === 26 && /\b(mala|mała|small)\b/.test(n) ||
+    size === 32 && /\b(srednia|średnia|medium)\b/.test(n) ||
+    size === 40 && /\b(duza|duża|large)\b/.test(n)
+  );
+}
+
+function baseDishKey(name) {
+  let n = normalizeTxt(name);
+  n = n
+    .replace(/\b(\d+\s*(cm|ml|g))\b/g, ' ')
+    .replace(/\b(duza|duża|mala|mała|srednia|średnia|xl|xxl|small|medium|large)\b/g, ' ')
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (n.includes('margherita')) n = 'pizza margherita';
+  if (n.includes('czosnkowa')) n = 'zupa czosnkowa';
+  return n;
+}
+
+function dedupHitsByBase(hits, preferredSize=null) {
+  const groups = new Map();
+  for (const h of hits) {
+    const key = `${h.restaurant_id}::${baseDishKey(h.name)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(h);
+  }
+  const selected = [];
+  const clarifications = [];
+
+  for (const [, arr] of groups) {
+    if (arr.length === 1) {
+      selected.push(arr[0]);
+      continue;
+    }
+    // auto-pick po rozmiarze, jeśli podano w tekście
+    if (preferredSize) {
+      const pick = arr.find(x => nameHasSize(x.name, preferredSize));
+      if (pick) { selected.push(pick); continue; }
+    }
+    // brak rozmiaru → pytamy
+    clarifications.push({
+      restaurant_id: arr[0].restaurant_id,
+      restaurant_name: arr[0].restaurant_name,
+      base: baseDishKey(arr[0].name),
+      options: arr.map(x => ({ id: x.menuItemId, name: x.name, price: x.price }))
+    });
+  }
+  return { selected, clarifications };
+}
+
+// Re-export fuzzyIncludes from helpers
+export function fuzzyIncludes(name, text) {
+  return fuzzyIncludesHelper(name, text);
+}
+
+const NAME_ALIASES = {
+  // Zupy
+  'czosnkowa': 'zupa czosnkowa',
+  'czosnkowe': 'zupa czosnkowa',
+  'czosnkowej': 'zupa czosnkowa',
+  'zurek': 'żurek śląski',
+  'zurku': 'żurek śląski',
+  'zurkiem': 'żurek śląski',
+  'pho': 'zupa pho bo',
+
+  // Pizza
+  'margherita': 'pizza margherita',
+  'margherite': 'pizza margherita',
+  'margerita': 'pizza margherita',  // częsty błąd STT
+  'margarita': 'pizza margherita',  // częsty błąd STT
+  'pepperoni': 'pizza pepperoni',
+  'hawajska': 'pizza hawajska',
+  'hawajskiej': 'pizza hawajska',
+  'diavola': 'pizza diavola',
+  'capricciosa': 'pizza capricciosa',
+
+  // Mięsa
+  'schabowy': 'kotlet schabowy',
+  'schabowe': 'kotlet schabowy',
+  'schabowego': 'kotlet schabowy',
+  'kotlet': 'kotlet schabowy',
+  'kotleta': 'kotlet schabowy',
+  'gulasz': 'gulasz wieprzowy',
+  'gulasza': 'gulasz wieprzowy',
+  'gulaszem': 'gulasz wieprzowy',
+  'rolada': 'rolada śląska',
+  'rolade': 'rolada śląska',
+  'rolady': 'rolada śląska',
+
+  // Pierogi
+  'pierogi': 'pierogi z mięsem',
+  'pierogów': 'pierogi z mięsem',
+  'pierogami': 'pierogi z mięsem',
+
+  // Włoskie
+  'lasagne': 'lasagne bolognese',
+  'lasania': 'lasagne bolognese',  // częsty błąd STT
+  'lasanie': 'lasagne bolognese',
+  'tiramisu': 'tiramisu',
+  'caprese': 'sałatka caprese',
+
+  // Azjatyckie
+  'pad thai': 'pad thai z krewetkami',
+  'pad taj': 'pad thai z krewetkami',  // częsty błąd STT
+  'padthai': 'pad thai z krewetkami',
+  'sajgonki': 'sajgonki z mięsem',
+  'sajgonek': 'sajgonki z mięsem',
+  'sajgonkami': 'sajgonki z mięsem',
+
+  // Inne
+  'burger': 'burger',
+  'burgera': 'burger',
+  'placki': 'placki ziemniaczane',
+  'placków': 'placki ziemniaczane',
+  'frytki': 'frytki belgijskie',
+  'frytek': 'frytki belgijskie',
+};
+
+export function applyAliases(text) {
+  if (!text) return '';
+  let t = normalizeTxt(text);
+  for (const [k,v] of Object.entries(NAME_ALIASES)) {
+    if (t.includes(k) && !t.includes(v)) {
+      t += ' ' + v;
+    }
+  }
+  return t;
 }
 
 function fuzzyMatch(a, b) {
@@ -11,32 +155,193 @@ function fuzzyMatch(a, b) {
   b = normalize(b);
   if (a === b) return true;
   if (a.includes(b) || b.includes(a)) return true;
-  const dist = levenshtein(a, b);
+  const dist = levenshteinHelper(a, b);
   return dist <= 2;
 }
 
-function levenshtein(a, b) {
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
+// ——— Menu catalog & order parsing ———
+async function loadMenuCatalog(session) {
+  // preferuj ostatnią restaurację z kontekstu, jeśli jest
+  const lastId = session?.lastRestaurant?.id || session?.restaurant?.id;
+
+  try {
+    let query = supabase
+      .from('menu_items')
+      .select('id,name,price,restaurant_id')
+      .limit(500); // lekko, ale wystarczy
+
+    if (lastId) {
+      query = query.eq('restaurant_id', lastId);
+      console.log(`[intent-router] Loading menu for restaurant: ${lastId}`);
+    } else {
+      console.log(`[intent-router] Loading all menu items (no restaurant in session)`);
     }
+
+    const { data: menuItems, error: menuError } = await query;
+    if (menuError) {
+      console.error('[intent-router] menu load error', menuError);
+      return [];
+    }
+
+    if (!menuItems?.length) {
+      console.warn('[intent-router] No menu items found');
+      return [];
+    }
+
+    // Pobierz nazwy restauracji
+    const restaurantIds = [...new Set(menuItems.map(mi => mi.restaurant_id))];
+    const { data: restaurants, error: restError } = await supabase
+      .from('restaurants')
+      .select('id,name')
+      .in('id', restaurantIds);
+
+    if (restError) {
+      console.error('[intent-router] restaurants load error', restError);
+      return [];
+    }
+
+    const restaurantMap = {};
+    restaurants?.forEach(r => {
+      restaurantMap[r.id] = r.name;
+    });
+
+    const catalog = menuItems.map(mi => ({
+      id: mi.id,
+      name: mi.name,
+      price: mi.price,
+      restaurant_id: mi.restaurant_id,
+      restaurant_name: restaurantMap[mi.restaurant_id] || 'Unknown'
+    }));
+
+    console.log(`[intent-router] Loaded ${catalog.length} menu items from ${restaurantIds.length} restaurants`);
+    return catalog;
+  } catch (err) {
+    console.error('[intent-router] loadMenuCatalog error:', err);
+    return [];
   }
-  return matrix[b.length][a.length];
 }
 
-export async function detectIntent(text) {
-  if (!text) return { intent: 'none', restaurant: null };
+function extractRequestedItems(text) {
+  // Wyodrębnij żądane pozycje z tekstu (proste rozpoznawanie po aliasach i nazwach)
+  const normalized = normalizeTxt(text);
+  const requestedSet = new Set();
+  
+  // Sprawdź aliasy
+  for (const [alias, fullName] of Object.entries(NAME_ALIASES)) {
+    if (normalized.includes(alias)) {
+      requestedSet.add(fullName);
+    }
+  }
+  
+  return Array.from(requestedSet).map(name => ({ name }));
+}
+
+// Rozpoznaj wiele dań w jednym tekście (split by "i", "oraz", ",")
+function splitMultipleItems(text) {
+  // Usuń słowa kluczowe zamówienia
+  let cleaned = text
+    .replace(/\b(zamów|zamówić|poproszę|chcę|wezmę|chciałbym|chciałabym)\b/gi, '')
+    .trim();
+
+  // Split by separators
+  const parts = cleaned.split(/\s+(i|oraz|,)\s+/i).filter(p => p && !['i', 'oraz', ','].includes(p.toLowerCase()));
+
+  // Jeśli nie ma separatorów, zwróć cały tekst
+  if (parts.length <= 1) {
+    return [text];
+  }
+
+  return parts;
+}
+
+export function parseOrderItems(text, catalog) {
+  // Null checks
+  if (!text || typeof text !== 'string') {
+    console.warn('[parseOrderItems] Invalid text input:', text);
+    return {
+      any: false,
+      groups: [],
+      clarify: [],
+      available: [],
+      unavailable: [],
+      needsClarification: false,
+      missingAll: true
+    };
+  }
+
+  const textAliased = applyAliases(text);
+  const preferredSize = extractSize(textAliased);
+  const requestedItems = extractRequestedItems(text);
+
+  // Obsługa pustego menu lub braku katalogu
+  if (!catalog || !Array.isArray(catalog) || catalog.length === 0) {
+    console.warn('[parseOrderItems] Invalid or empty catalog:', catalog);
+    return {
+      any: false,
+      groups: [],
+      clarify: [],
+      available: [],
+      unavailable: requestedItems || [],
+      needsClarification: false,
+      missingAll: true
+    };
+  }
+
+  // Multi-item parsing: split text by "i", "oraz", ","
+  const itemTexts = splitMultipleItems(textAliased);
+  const allHits = [];
+
+  for (const itemText of itemTexts) {
+    if (!itemText || typeof itemText !== 'string') continue;
+
+    const qty = extractQuantity(itemText);
+    const hits = catalog
+      .filter(it => it && it.name && fuzzyIncludes(it.name, itemText))
+      .map(it => ({
+        menuItemId: it.id || null,
+        name: it.name || 'Unknown',
+        price: it.price || 0,
+        quantity: qty || 1,
+        restaurant_id: it.restaurant_id || null,
+        restaurant_name: it.restaurant_name || 'Unknown',
+        matchScore: 1.0
+      }));
+    allHits.push(...hits);
+  }
+
+  const { selected, clarifications } = dedupHitsByBase(allHits, preferredSize);
+
+  // Sprawdź czy są niedostępne pozycje (fallback)
+  const matched = (selected || []).filter(h => h && h.matchScore > 0.75);
+  const requestedNames = (requestedItems || []).map(i => i && i.name ? i.name.toLowerCase() : '').filter(Boolean);
+  const availableNames = matched.map(m => m && m.name ? m.name.toLowerCase() : '').filter(Boolean);
+  const unavailableNames = requestedNames.filter(n => !availableNames.includes(n));
+
+  const byR = {};
+  for (const h of matched) {
+    byR[h.restaurant_id] ??= { restaurant_id: h.restaurant_id, restaurant_name: h.restaurant_name, items: [] };
+    byR[h.restaurant_id].items.push({
+      menuItemId: h.menuItemId, name: h.name, price: h.price, quantity: h.quantity
+    });
+  }
+
+  return {
+    any: allHits.length > 0,
+    groups: Object.values(byR),
+    clarify: clarifications,
+    available: matched,
+    unavailable: unavailableNames,
+    needsClarification: unavailableNames.length > 0 || (clarifications && clarifications.length > 0)
+  };
+}
+
+export async function detectIntent(text, session = null) {
+  console.log('[intent-router] 🚀 detectIntent called with:', { text, sessionId: session?.id });
+  
+  if (!text) {
+    updateDebugSession({ intent: 'none', restaurant: null, sessionId: session?.id || null });
+    return { intent: 'none', restaurant: null };
+  }
 
   try {
     // --- Korekta STT / lokalizacji ---
@@ -47,7 +352,180 @@ export async function detectIntent(text) {
       .replace(/\bpizzeriach\b/g, "pizzerie") // dopasowanie intencji
       .trim();
 
-    const lower = normalize(normalizedText);
+    const lower = normalizeTxt(normalizedText);
+
+    // ——— CONFIRM FLOW V2 (with modify) ———
+    const confirmYes = [
+      "tak", "potwierdzam", "zamawiam", "poproszę", "oczywiście", "jasne", "dobrze"
+    ];
+    const confirmNo = [
+      "nie", "rezygnuję", "anuluj", "poczekaj", "nie teraz", "nie zamawiaj"
+    ];
+    const confirmModify = [
+      "coś innego", "inne", "zmień", "chciałbym coś innego", "inny zestaw"
+    ];
+
+    // Sprawdź confirm flow tylko jeśli jest oczekujące zamówienie
+    if (session?.lastPendingOrder) {
+      if (confirmYes.some(p => lower.includes(p))) {
+        const order = session.lastPendingOrder;
+        delete session.lastPendingOrder;
+        updateDebugSession({ 
+          intent: "confirm_yes", 
+          restaurant: order?.restaurant_name || null,
+          sessionId: session?.id || null,
+          confidence: 1.0
+        });
+        return {
+          intent: "confirm_yes",
+          order: order,
+          reply: `Świetnie! Zamówienie potwierdzone: ${order.items?.map(i => i.name).join(", ")}`,
+          confidence: 1.0
+        };
+      }
+      if (confirmNo.some(p => lower.includes(p))) {
+        delete session.lastPendingOrder;
+        updateDebugSession({ 
+          intent: "confirm_no", 
+          restaurant: null,
+          sessionId: session?.id || null,
+          confidence: 1.0
+        });
+        return {
+          intent: "confirm_no",
+          reply: "Okej, rezygnuję z zamówienia. Mogę Ci jeszcze w czymś pomóc?",
+          confidence: 1.0
+        };
+      }
+      if (confirmModify.some(p => lower.includes(p))) {
+        const oldOrder = session.lastPendingOrder;
+        delete session.lastPendingOrder;
+        updateDebugSession({ 
+          intent: "modify_order", 
+          restaurant: oldOrder?.restaurant_name || null,
+          sessionId: session?.id || null,
+          confidence: 1.0
+        });
+        return {
+          intent: "modify_order",
+          oldOrder: oldOrder,
+          reply: `Okej, zmieniam zamówienie. Co zamiast ${oldOrder.items?.map(i => i.name).join(", ")}?`,
+          confidence: 1.0
+        };
+      }
+    }
+
+    // ——— EARLY DISH DETECTION (PRIORITY 1) ———
+    console.log('[intent-router] 🔍 Starting early dish detection for text:', text);
+    console.log('[intent-router] 🔍 Normalized text:', normalizedText);
+    try {
+      // 🔹 KROK 1: Sprawdź czy w tekście jest nazwa restauracji
+      // Jeśli tak, załaduj menu z tej restauracji (nie z session)
+      let targetRestaurant = null;
+      const { data: restaurantsList } = await supabase
+        .from('restaurants')
+        .select('id, name');
+
+      if (restaurantsList?.length) {
+        for (const r of restaurantsList) {
+          const normalizedName = normalizeTxt(r.name);
+
+          // Exact match
+          if (normalizedText.includes(normalizedName)) {
+            targetRestaurant = r;
+            console.log(`[intent-router] 🏪 Restaurant detected in text (exact): ${r.name}`);
+            break;
+          }
+
+          // Fuzzy match: sprawdź czy większość słów z nazwy jest w tekście
+          const nameWords = normalizedName.split(' ').filter(w => w.length > 2);
+          const textWords = normalizedText.split(' ');
+          const matchedWords = nameWords.filter(w => textWords.some(tw => tw.includes(w) || w.includes(tw)));
+
+          if (matchedWords.length >= Math.ceil(nameWords.length * 0.6)) {
+            targetRestaurant = r;
+            console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords.join(', ')})`);
+            break;
+          }
+        }
+      }
+
+      // 🔹 KROK 2: Załaduj katalog menu
+      // Jeśli znaleziono restaurację w tekście, użyj jej
+      // W przeciwnym razie użyj session
+      const sessionWithRestaurant = targetRestaurant
+        ? { lastRestaurant: targetRestaurant }
+        : session;
+
+      const catalog = await loadMenuCatalog(sessionWithRestaurant);
+      console.log(`[intent-router] Catalog loaded: ${catalog.length} items`);
+
+      if (catalog.length) {
+        console.log('[intent-router] 🔍 Calling parseOrderItems...');
+        const parsed = parseOrderItems(normalizedText, catalog);
+        console.log(`[intent-router] Parsed result:`, parsed);
+
+        // Obsługa pustego menu
+        if (parsed.missingAll) {
+          console.log('⚠️ No menu items found in catalog');
+          updateDebugSession({ 
+            intent: 'no_menu_items', 
+            restaurant: null,
+            sessionId: session?.id || null,
+            confidence: 0.8
+          });
+          return {
+            intent: 'no_menu_items',
+            reply: 'Nie znalazłam żadnych pozycji w menu tej restauracji. Może chcesz sprawdzić coś innego?',
+            confidence: 0.8,
+            fallback: true
+          };
+        }
+
+        // Sprawdź czy są niedostępne pozycje (nawet jeśli parsed.any === false)
+        if (parsed.unavailable && parsed.unavailable.length > 0 && parsed.needsClarification) {
+          const missing = parsed.unavailable.join(', ');
+          const restaurantName = session?.lastRestaurant?.name || 'tym menu';
+          console.log(`⚠️ Unavailable items detected: ${missing} in ${restaurantName}`);
+          
+          updateDebugSession({ 
+            intent: 'clarify_order', 
+            restaurant: restaurantName,
+            sessionId: session?.id || null,
+            confidence: 0.9
+          });
+          return {
+            intent: 'clarify_order',
+            parsedOrder: parsed,
+            reply: `Nie znalazłam aktualnie ${missing} w menu ${restaurantName}, może chciałbyś coś innego?`,
+            confidence: 0.9,
+            unavailable: parsed.unavailable
+          };
+        }
+
+        if (parsed.any) {
+          console.log(`🍽️ Dish detected: ${parsed.groups.map(g => g.items.map(i => i.name).join(', ')).join(' | ')}`);
+          
+          updateDebugSession({ 
+            intent: 'create_order', 
+            restaurant: parsed.groups[0]?.restaurant_name || null,
+            sessionId: session?.id || null,
+            confidence: 0.85
+          });
+          return {
+            intent: 'create_order',
+            parsedOrder: parsed,   // brainRouter użyje tego bez fallbacków
+            confidence: 0.85
+          };
+        } else {
+          console.log('[intent-router] No dishes matched in catalog');
+        }
+      } else {
+        console.log('[intent-router] Catalog is empty, skipping dish detection');
+      }
+    } catch (e) {
+      console.error('[intent-router] dish parse error:', e);
+    }
 
     // Bazowe słowa kluczowe (bez duplikatów) — ZNORMALIZOWANE
     const findNearbyKeywords = [
@@ -55,7 +533,9 @@ export async function detectIntent(text) {
       'w okolicy', 'blisko', 'coś do jedzenia', 'posiłek', 'obiad',
       'gdzie zjem', 'co polecasz', 'restauracje w pobliżu',
       'mam ochotę', 'ochotę na', 'chcę coś', 'szukam', 'szukam czegoś',
-      'coś azjatyckiego', 'coś lokalnego', 'coś szybkiego'
+      'coś azjatyckiego', 'coś lokalnego', 'coś szybkiego',
+      'dostępne', 'co jest dostępne', 'co dostępne', 'co mam w pobliżu',
+      'co w okolicy', 'co jest w okolicy'
     ];
 
     const menuKeywords = [
@@ -78,9 +558,9 @@ export async function detectIntent(text) {
     const learnedMenu = learned?.filter(p => p.intent === 'menu_request') || [];
     const learnedOrder = learned?.filter(p => p.intent === 'create_order') || [];
 
-    const dynamicNearbyKeywords = learnedNearby.map(p => normalize(p.text));
-    const dynamicMenuKeywords = learnedMenu.map(p => normalize(p.text));
-    const dynamicOrderKeywords = learnedOrder.map(p => normalize(p.text));
+    const dynamicNearbyKeywords = learnedNearby.map(p => normalizeTxt(p.text));
+    const dynamicMenuKeywords = learnedMenu.map(p => normalizeTxt(p.text));
+    const dynamicOrderKeywords = learnedOrder.map(p => normalizeTxt(p.text));
 
     // Deduplikacja — usuń duplikaty między bazowymi a dynamicznymi
     const allNearbyKeywords = [...new Set([...findNearbyKeywords, ...dynamicNearbyKeywords])];
@@ -102,9 +582,9 @@ export async function detectIntent(text) {
       .select('id, name');
 
     if (restaurantsList?.length) {
-      const normalizedText = normalize(text);
+      const normalizedText = normalizeTxt(text);
       for (const r of restaurantsList) {
-        const normalizedName = normalize(r.name);
+        const normalizedName = normalizeTxt(r.name);
 
         // Sprawdź czy nazwa restauracji jest w tekście (fuzzy match)
         // 1. Exact substring match
@@ -139,13 +619,31 @@ export async function detectIntent(text) {
         if (matchedWords >= Math.ceil(nameWords.length / 2)) {
           // Jeśli jest "menu" → menu_request
           if (allMenuKeywords.some(k => lower.includes(k))) {
+            updateDebugSession({ 
+              intent: 'menu_request', 
+              restaurant: r.name,
+              sessionId: session?.id || null,
+              confidence: 0.9
+            });
             return { intent: 'menu_request', restaurant: r };
           }
           // Jeśli jest "zamów"/"wybieram" → create_order
           if (allOrderKeywords.some(k => lower.includes(k))) {
+            updateDebugSession({ 
+              intent: 'create_order', 
+              restaurant: r.name,
+              sessionId: session?.id || null,
+              confidence: 0.9
+            });
             return { intent: 'create_order', restaurant: r };
           }
           // W przeciwnym razie → select_restaurant
+          updateDebugSession({ 
+            intent: 'select_restaurant', 
+            restaurant: r.name,
+            sessionId: session?.id || null,
+            confidence: 0.9
+          });
           return { intent: 'select_restaurant', restaurant: r };
         }
       }
@@ -153,16 +651,43 @@ export async function detectIntent(text) {
 
     // 🔹 PRIORYTET 2: Sprawdź menu keywords (bardziej specyficzne niż order)
     if (allMenuKeywords.some(k => lower.includes(k))) {
+      updateDebugSession({ 
+        intent: 'menu_request', 
+        restaurant: null,
+        sessionId: session?.id || null,
+        confidence: 0.8
+      });
       return { intent: 'menu_request', restaurant: null };
     }
 
     // 🔹 PRIORYTET 3: Sprawdź order keywords
     if (allOrderKeywords.some(k => lower.includes(k))) {
+      updateDebugSession({ 
+        intent: 'create_order', 
+        restaurant: null,
+        sessionId: session?.id || null,
+        confidence: 0.8
+      });
       return { intent: 'create_order', restaurant: null };
     }
 
     // 🔹 PRIORYTET 4: Sprawdź nearby keywords
-    if (allNearbyKeywords.some(k => lower.includes(k))) {
+    console.log('[intent-router] Checking nearby keywords...');
+    console.log('[intent-router] Text:', text);
+    console.log('[intent-router] Normalized:', lower);
+    console.log('[intent-router] All nearby keywords:', allNearbyKeywords);
+    
+    const matchingKeywords = allNearbyKeywords.filter(k => lower.includes(k));
+    console.log('[intent-router] Matching keywords:', matchingKeywords);
+    
+    if (matchingKeywords.length > 0) {
+      console.log('[intent-router] ✅ Found nearby intent!');
+      updateDebugSession({ 
+        intent: 'find_nearby', 
+        restaurant: null,
+        sessionId: session?.id || null,
+        confidence: 0.8
+      });
       return { intent: 'find_nearby', restaurant: null };
     }
 
@@ -173,9 +698,21 @@ export async function detectIntent(text) {
       console.warn('⚠️ Phrase insert skipped:', err.message);
     }
 
+    updateDebugSession({ 
+      intent: 'none', 
+      restaurant: null,
+      sessionId: session?.id || null,
+      confidence: 0.0
+    });
     return { intent: 'none', restaurant: null };
   } catch (err) {
     console.error('🧠 detectIntent error:', err.message);
+    updateDebugSession({ 
+      intent: 'error', 
+      restaurant: null,
+      sessionId: session?.id || null,
+      confidence: 0.0
+    });
     return { intent: 'none', restaurant: null };
   }
 }
@@ -291,7 +828,7 @@ export async function handleIntent(intent, text, session) {
 
 export async function trainIntent(phrase, correctIntent) {
   try {
-    const normalized = normalize(phrase);
+    const normalized = normalizeTxt(phrase);
     const { data: existing, error } = await supabase
       .from('phrases')
       .select('id, text, intent');

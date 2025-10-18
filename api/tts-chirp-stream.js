@@ -14,11 +14,11 @@ export default async function handler(req, res) {
     // Adaptive tone parameters for live streaming
     const pitch = tone === "swobodny" ? 2.5 : tone === "formalny" ? -0.5 : 0.5;
     const speakingRate = tone === "swobodny" ? 1.2 : tone === "formalny" ? 0.9 : 1.05;
-    
+
     console.log('🎤 Live Stream TTS with tone:', { tone, pitch, speakingRate });
 
     const token = await getVertexAccessToken();
-    
+
     const response = await fetch(
       "https://texttospeech.googleapis.com/v1/text:synthesize",
       {

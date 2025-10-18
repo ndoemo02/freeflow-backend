@@ -14,11 +14,11 @@ export default async function handler(req, res) {
     // Adaptive tone parameters
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
-    
+
     console.log('🎤 Classic HD TTS with tone:', { tone, pitch, speakingRate });
 
     const token = await getVertexAccessToken();
-    
+
     const response = await fetch(
       "https://texttospeech.googleapis.com/v1/text:synthesize",
       {

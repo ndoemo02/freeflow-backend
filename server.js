@@ -45,6 +45,7 @@ import OpenAI from "openai";
 import speech from "@google-cloud/speech";
 import textToSpeech from "@google-cloud/text-to-speech";
 import { ALLOWED_HEADERS, isAllowedOrigin } from "./api/_cors.js";
+import debugApi from "./api/debug.js";
 
 const app = express();
 app.use(express.json());
@@ -218,6 +219,12 @@ app.post("/api/tts-chirp-stream", async (req, res) => {
   }
 });
 
+// === [8] DEBUG API ===
+app.use('/api', debugApi);
+
+// === [9] WATCHDOG SYSTEM ===
+import { runWatchdog } from "./api/watchdog/core.js";
+
 // === [7] WebSocket STT ===
 const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer });
@@ -239,3 +246,14 @@ const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
   console.log(`🚀 FreeFlow backend running on port ${PORT}`);
 });
+
+// --- WATCHDOG MONITORING ---
+setInterval(async () => {
+  try {
+    await runWatchdog();
+  } catch (e) {
+    console.error("💥 Watchdog alert triggered:", e.message);
+  }
+}, 30000);
+
+console.log("✅ FreeFlow Watchdog initialized successfully.");
