@@ -15,10 +15,11 @@ export default async function handler(req, res) {
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
 
-    console.log('🎤 Classic HD TTS with tone:', { tone, pitch, speakingRate });
+    console.log('🎤 Chirp HD TTS (Vertex AI 2025) with tone:', { tone, pitch, speakingRate });
 
     const token = await getVertexAccessToken();
-
+    
+    // Vertex AI TTS endpoint (2025) - standardowe API
     const response = await fetch(
       "https://texttospeech.googleapis.com/v1/text:synthesize",
       {
@@ -31,12 +32,13 @@ export default async function handler(req, res) {
           input: { text },
           voice: {
             languageCode: "pl-PL",
-            name: "pl-PL-Wavenet-D" // Chirp HD damski
+            name: "pl-PL-Wavenet-A" // Erinome (Female) - głos żeński HD
           },
           audioConfig: {
             audioEncoding: "MP3",
             pitch,
-            speakingRate
+            speakingRate,
+            effectsProfileId: ["headphone-class-device"] // Lepszej jakości dla Chirp HD
           }
         })
       }

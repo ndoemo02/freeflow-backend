@@ -5,16 +5,17 @@ import { getVertexAccessToken } from '../utils/googleAuth.js';
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {
-    const { voice = "pl-PL-Wavenet-D", tone = "neutral" } = options;
+    const { voice = "pl-PL-Wavenet-D", tone = "swobodny" } = options;
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
 
-    console.log('🎤 playTTS called:', { text: text.substring(0, 50), voice, tone });
+    console.log('🎤 playTTS (Vertex AI 2025) called:', { text: text.substring(0, 50), voice, tone });
 
     // Użyj getVertexAccessToken zamiast bezpośredniego klucza API
     const accessToken = await getVertexAccessToken();
     console.log('✅ Google access token obtained successfully');
 
+    // Vertex AI TTS endpoint (2025) - standardowe API
     const response = await fetch(
       "https://texttospeech.googleapis.com/v1/text:synthesize",
       {
@@ -66,12 +67,13 @@ export default async function handler(req, res) {
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
     
-    console.log('🎤 TTS with tone:', { tone, pitch, speakingRate });
+    console.log('🎤 TTS (Vertex AI 2025) with tone:', { tone, pitch, speakingRate });
 
     // Użyj getVertexAccessToken zamiast bezpośredniego klucza API
     const accessToken = await getVertexAccessToken();
     console.log('✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel/Cloud)');
 
+    // Vertex AI TTS endpoint (2025) - standardowe API
     const response = await fetch(
       "https://texttospeech.googleapis.com/v1/text:synthesize",
       {
@@ -84,7 +86,7 @@ export default async function handler(req, res) {
           input: { text },
           voice: {
             languageCode: "pl-PL",
-            name: "pl-PL-Wavenet-D" // Chirp HD damski
+            name: "pl-PL-Wavenet-D" // Wavenet damski - opcja podstawowa
           },
           audioConfig: {
             audioEncoding: "MP3",

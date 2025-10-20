@@ -185,6 +185,15 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
+app.patch("/api/orders/:id", async (req, res) => {
+  try {
+    const ordersHandler = await import("./api/orders.js");
+    return ordersHandler.default(req, res);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // === [6] TTS (Google i Chirp) ===
 app.post("/api/tts", async (req, res) => {
   try {

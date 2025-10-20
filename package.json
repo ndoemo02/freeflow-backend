@@ -19,7 +19,8 @@
     "test:e2e": "vitest run tests/e2e",
     "test:performance": "vitest run tests/performance",
     "test:parse": "node tests/test-parse.js",
-    "test:brain": "node run-brain-tests.js"
+    "test:brain": "node run-brain-tests.js",
+    "test:orders": "npx vitest tests/orders-api.test.js --run"
   },
   "dependencies": {
     "@google-cloud/speech": "^6.0.0",

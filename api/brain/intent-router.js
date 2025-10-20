@@ -418,17 +418,21 @@ export async function detectIntent(text, session = null) {
     // ——— EARLY DISH DETECTION (PRIORITY 1) ———
     console.log('[intent-router] 🔍 Starting early dish detection for text:', text);
     console.log('[intent-router] 🔍 Normalized text:', normalizedText);
+    
+    // 🔹 KROK 1: Sprawdź czy w tekście jest nazwa restauracji
+    // Jeśli tak, załaduj menu z tej restauracji (nie z session)
+    let targetRestaurant = null;
+    
     try {
-      // 🔹 KROK 1: Sprawdź czy w tekście jest nazwa restauracji
-      // Jeśli tak, załaduj menu z tej restauracji (nie z session)
-      let targetRestaurant = null;
       const { data: restaurantsList } = await supabase
         .from('restaurants')
         .select('id, name');
 
       if (restaurantsList?.length) {
+        console.log(`[intent-router] 🔍 Checking ${restaurantsList.length} restaurants for fuzzy match`);
         for (const r of restaurantsList) {
           const normalizedName = normalizeTxt(r.name);
+          console.log(`[intent-router] 🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
 
           // Exact match
           if (normalizedText.includes(normalizedName)) {
@@ -437,17 +441,36 @@ export async function detectIntent(text, session = null) {
             break;
           }
 
-          // Fuzzy match: sprawdź czy większość słów z nazwy jest w tekście
-          const nameWords = normalizedName.split(' ').filter(w => w.length > 2);
+          // Fuzzy match: sprawdź czy słowa z nazwy są w tekście (z Levenshtein distance)
+          const nameWords = normalizedName.split(' ');
           const textWords = normalizedText.split(' ');
-          const matchedWords = nameWords.filter(w => textWords.some(tw => tw.includes(w) || w.includes(tw)));
+          let matchedWords = 0;
+          console.log(`[intent-router] 🔍 Fuzzy match - name words: [${nameWords.join(', ')}], text words: [${textWords.join(', ')}]`);
 
-          if (matchedWords.length >= Math.ceil(nameWords.length * 0.6)) {
+          for (const nameWord of nameWords) {
+            for (const textWord of textWords) {
+              const dist = levenshteinHelper(textWord, nameWord);
+              console.log(`[intent-router] 🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
+              if (textWord === nameWord || dist <= 1) {
+                matchedWords++;
+                console.log(`[intent-router] ✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
+                break;
+              }
+            }
+          }
+
+          const threshold = Math.ceil(nameWords.length / 2);
+          console.log(`[intent-router] 🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
+          
+          if (matchedWords >= threshold) {
             targetRestaurant = r;
-            console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords.join(', ')})`);
+            console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords}/${nameWords.length})`);
+            console.log(`[intent-router] 🏪 targetRestaurant set to:`, targetRestaurant);
             break;
           }
         }
+      } else {
+        console.log(`[intent-router] ❌ No restaurants found in database`);
       }
 
       // 🔹 KROK 2: Załaduj katalog menu
@@ -483,24 +506,70 @@ export async function detectIntent(text, session = null) {
         }
 
         // Sprawdź czy są niedostępne pozycje (nawet jeśli parsed.any === false)
+        // ⚠️ ALE: jeśli tekst zawiera nazwę restauracji, to nie zwracaj clarify_order
+        // (user może mówić np. "klaps burger" = nazwa restauracji, a nie zamówienie)
         if (parsed.unavailable && parsed.unavailable.length > 0 && parsed.needsClarification) {
           const missing = parsed.unavailable.join(', ');
           const restaurantName = session?.lastRestaurant?.name || 'tym menu';
           console.log(`⚠️ Unavailable items detected: ${missing} in ${restaurantName}`);
           
-          updateDebugSession({ 
-            intent: 'clarify_order', 
-            restaurant: restaurantName,
-            sessionId: session?.id || null,
-            confidence: 0.9
-          });
-          return {
-            intent: 'clarify_order',
-            parsedOrder: parsed,
-            reply: `Nie znalazłam aktualnie ${missing} w menu ${restaurantName}, może chciałbyś coś innego?`,
-            confidence: 0.9,
-            unavailable: parsed.unavailable
-          };
+          // Sprawdź czy tekst zawiera nazwę restauracji (może to być nazwa restauracji, a nie zamówienie)
+          let containsRestaurantName = false;
+          const { data: restaurantsCheck } = await supabase
+            .from('restaurants')
+            .select('id, name');
+          
+          console.log(`🔍 Checking if text contains restaurant name: "${normalizedText}"`);
+          
+          if (restaurantsCheck?.length) {
+            for (const r of restaurantsCheck) {
+              const normalizedName = normalizeTxt(r.name);
+              const nameWords = normalizedName.split(' ');
+              const textWords = normalizedText.split(' ');
+              let matchedWords = 0;
+
+              console.log(`🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
+              console.log(`🔍 Name words: [${nameWords.join(', ')}], Text words: [${textWords.join(', ')}]`);
+
+              for (const nameWord of nameWords) {
+                for (const textWord of textWords) {
+                  const dist = levenshteinHelper(textWord, nameWord);
+                  console.log(`🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
+                  if (textWord === nameWord || dist <= 1) {
+                    matchedWords++;
+                    console.log(`✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
+                    break;
+                  }
+                }
+              }
+
+              const threshold = Math.ceil(nameWords.length / 2);
+              console.log(`🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
+              
+              if (matchedWords >= threshold) {
+                containsRestaurantName = true;
+                console.log(`✅ Text contains restaurant name: ${r.name} — skipping clarify_order`);
+                break;
+              }
+            }
+          }
+
+          // Jeśli tekst NIE zawiera nazwy restauracji, to zwróć clarify_order
+          if (!containsRestaurantName) {
+            updateDebugSession({ 
+              intent: 'clarify_order', 
+              restaurant: restaurantName,
+              sessionId: session?.id || null,
+              confidence: 0.9
+            });
+            return {
+              intent: 'clarify_order',
+              parsedOrder: parsed,
+              reply: `Nie znalazłam aktualnie ${missing} w menu ${restaurantName}, może chciałbyś coś innego?`,
+              confidence: 0.9,
+              unavailable: parsed.unavailable
+            };
+          }
         }
 
         if (parsed.any) {
@@ -527,14 +596,15 @@ export async function detectIntent(text, session = null) {
       console.error('[intent-router] dish parse error:', e);
     }
 
-    // Bazowe słowa kluczowe (bez duplikatów) — ZNORMALIZOWANE
+    // 🔹 KROK 3: Przygotuj słowa kluczowe (przed sprawdzeniem targetRestaurant)
+    // Bazowe słowa kluczowe (BEZ polskich znaków - znormalizowane przez normalizeTxt)
     const findNearbyKeywords = [
-      'zjeść', 'restaurac', 'pizza', 'kebab', 'burger', 'zjeść coś', 'gdzie',
-      'w okolicy', 'blisko', 'coś do jedzenia', 'posiłek', 'obiad',
-      'gdzie zjem', 'co polecasz', 'restauracje w pobliżu',
-      'mam ochotę', 'ochotę na', 'chcę coś', 'szukam', 'szukam czegoś',
-      'coś azjatyckiego', 'coś lokalnego', 'coś szybkiego',
-      'dostępne', 'co jest dostępne', 'co dostępne', 'co mam w pobliżu',
+      'zjesc', 'restaurac', 'pizza', 'kebab', 'burger', 'zjesc cos', 'gdzie',
+      'w okolicy', 'blisko', 'cos do jedzenia', 'posilek', 'obiad',
+      'gdzie zjem', 'co polecasz', 'restauracje w poblizu',
+      'mam ochote', 'ochote na', 'chce cos', 'szukam', 'szukam czegos',
+      'cos azjatyckiego', 'cos lokalnego', 'cos szybkiego',
+      'dostepne', 'co jest dostepne', 'co dostepne', 'co mam w poblizu',
       'co w okolicy', 'co jest w okolicy'
     ];
 
@@ -546,7 +616,7 @@ export async function detectIntent(text, session = null) {
     const orderKeywords = [
       'zamow', 'poproshe', 'chce zamowic', 'zloz zamowienie', 'zamowic cos',
       'dodaj do zamowienia', 'zloz', 'wybieram', 'biore', 'wezme'
-      // Usunięto 'chce' — zbyt ogólne, koliduje z "chcę coś szybkiego" (find_nearby)
+      // Usunięto 'chce' — zbyt ogólne, koliduje z "chce cos szybkiego" (find_nearby)
     ];
 
     // Pobierz nauczone frazy z bazy
@@ -567,6 +637,53 @@ export async function detectIntent(text, session = null) {
     const allMenuKeywords = [...new Set([...menuKeywords, ...dynamicMenuKeywords])];
     const allOrderKeywords = [...new Set([...orderKeywords, ...dynamicOrderKeywords])];
 
+    // 🔹 KROK 4: Jeśli w early dish detection znaleziono restaurację, ale nie znaleziono dań
+    // to zwróć odpowiedni intent na podstawie słów kluczowych
+    console.log(`[intent-router] 🔍 Checking targetRestaurant:`, targetRestaurant);
+    if (targetRestaurant) {
+      console.log(`[intent-router] 🏪 Restaurant found in early detection: ${targetRestaurant.name}, checking keywords...`);
+      console.log(`[intent-router] 🔍 Lower text: "${lower}"`);
+      console.log(`[intent-router] 🔍 Menu keywords:`, allMenuKeywords);
+      console.log(`[intent-router] 🔍 Order keywords:`, allOrderKeywords);
+      
+      // Sprawdź słowa kluczowe
+      if (allMenuKeywords.some(k => lower.includes(k))) {
+        console.log(`[intent-router] ✅ Menu keyword found, returning menu_request`);
+        updateDebugSession({ 
+          intent: 'menu_request', 
+          restaurant: targetRestaurant.name,
+          sessionId: session?.id || null,
+          confidence: 0.9
+        });
+        return { intent: 'menu_request', restaurant: targetRestaurant };
+      }
+      
+      if (allOrderKeywords.some(k => lower.includes(k))) {
+        console.log(`[intent-router] ✅ Order keyword found, returning create_order`);
+        updateDebugSession({ 
+          intent: 'create_order', 
+          restaurant: targetRestaurant.name,
+          sessionId: session?.id || null,
+          confidence: 0.9
+        });
+        return { intent: 'create_order', restaurant: targetRestaurant };
+      }
+      
+      // W przeciwnym razie → select_restaurant
+      console.log(`[intent-router] ✅ No specific keywords, returning select_restaurant`);
+      updateDebugSession({ 
+        intent: 'select_restaurant', 
+        restaurant: targetRestaurant.name,
+        sessionId: session?.id || null,
+        confidence: 0.9
+      });
+      return { intent: 'select_restaurant', restaurant: targetRestaurant };
+    } else {
+      console.log(`[intent-router] ❌ No targetRestaurant found, continuing to keyword detection`);
+    }
+
+    // Słowa kluczowe już zdefiniowane wcześniej
+
     // 🔹 PRIORYTET 0: Sprawdź czy w tekście jest ilość (2x, 3x, "dwa razy", etc.)
     // Jeśli tak, to najprawdopodobniej user chce zamówić, nie wybierać restauracji
     const quantityPattern = /(\d+\s*x|\d+\s+razy|dwa\s+razy|trzy\s+razy|kilka)/i;
@@ -577,18 +694,24 @@ export async function detectIntent(text, session = null) {
 
     // 🔹 PRIORYTET 1: Sprawdź czy w tekście jest nazwa restauracji (fuzzy matching)
     // Jeśli tak, to najprawdopodobniej user chce wybrać restaurację lub zobaczyć menu
+    console.log('🔍 PRIORYTET 1: Sprawdzam restauracje w tekście:', text);
     const { data: restaurantsList } = await supabase
       .from('restaurants')
       .select('id, name');
+    
+    console.log('🔍 Znaleziono restauracji:', restaurantsList?.length || 0);
 
     if (restaurantsList?.length) {
       const normalizedText = normalizeTxt(text);
+      console.log('🔍 Normalizowany tekst:', normalizedText);
       for (const r of restaurantsList) {
         const normalizedName = normalizeTxt(r.name);
+        console.log('🔍 Sprawdzam restaurację:', r.name, '->', normalizedName);
 
         // Sprawdź czy nazwa restauracji jest w tekście (fuzzy match)
         // 1. Exact substring match
         if (normalizedText.includes(normalizedName)) {
+          console.log('✅ Exact match found:', r.name);
           // Jeśli jest "menu" → menu_request
           if (allMenuKeywords.some(k => lower.includes(k))) {
             return { intent: 'menu_request', restaurant: r };
@@ -605,18 +728,24 @@ export async function detectIntent(text, session = null) {
         const nameWords = normalizedName.split(' ');
         const textWords = normalizedText.split(' ');
         let matchedWords = 0;
+        console.log('🔍 Fuzzy match - name words:', nameWords, 'text words:', textWords);
 
         for (const nameWord of nameWords) {
           for (const textWord of textWords) {
-            if (textWord === nameWord || levenshtein(textWord, nameWord) <= 1) {
+            const dist = levenshteinHelper(textWord, nameWord);
+            console.log('🔍 Comparing:', textWord, 'vs', nameWord, 'distance:', dist);
+            if (textWord === nameWord || dist <= 1) {
               matchedWords++;
+              console.log('✅ Word match!');
               break;
             }
           }
         }
 
+        console.log('🔍 Matched words:', matchedWords, 'out of', nameWords.length, 'threshold:', Math.ceil(nameWords.length / 2));
         // Jeśli ≥50% słów z nazwy restauracji pasuje → uznaj za match
         if (matchedWords >= Math.ceil(nameWords.length / 2)) {
+          console.log('✅ Fuzzy match found:', r.name);
           // Jeśli jest "menu" → menu_request
           if (allMenuKeywords.some(k => lower.includes(k))) {
             updateDebugSession({ 

@@ -1,21 +1,10 @@
 import express from "express";
 import { supabase } from "../_supabase.js";
+import { calculateDistance } from "../brain/helpers.js";
 
 const router = express.Router();
 
-// Funkcja licząca dystans między punktami (Haversine formula)
-function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // promień Ziemi w km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) *
-    Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
+// ✅ calculateDistance zaimportowana z helpers.js (deduplikacja)
 
 // Endpoint: /api/restaurants/nearby?lat=50.3859&lng=18.9461&radius=2
 router.get("/nearby", async (req, res) => {
@@ -35,7 +24,7 @@ router.get("/nearby", async (req, res) => {
     const nearby = restaurants
       .map((r) => ({
         ...r,
-        distance_km: calculateDistance(lat, lng, r.lat, r.lng),
+        distance_km: calculateDistance(parseFloat(lat), parseFloat(lng), r.lat, r.lng),
       }))
       .filter((r) => r.distance_km <= radius)
       .sort((a, b) => a.distance_km - b.distance_km);

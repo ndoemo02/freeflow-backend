@@ -1,5 +1,6 @@
 import { supabase } from "./_supabase.js";
 import { applyCORS } from "./_cors.js";
+import { normalizeTxt, levenshtein } from "./brain/helpers.js";
 
 // 🛒 Nowy endpoint dla create_order
 export async function createOrderEndpoint(req, res) {
@@ -21,13 +22,17 @@ export async function createOrderEndpoint(req, res) {
     if (!restaurant_id || !items?.length)
       return res.status(400).json({ ok: false, error: "Incomplete order data" });
 
+    // Calculate total from items
+    const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    
     const { data, error } = await supabase
       .from("orders")
       .insert([
         {
-          restaurant_id,
-          items,
-          session_id: sessionId,
+          restaurant_id: restaurant_id,
+          user_id: null, // Guest order
+          items: items,
+          total_price: total,
           status: "pending",
           created_at: new Date().toISOString(),
         },
@@ -37,39 +42,17 @@ export async function createOrderEndpoint(req, res) {
 
     if (error) throw error;
 
-    return res.status(200).json({ ok: true, id: data.id, items: data.items });
+    return res.status(200).json({ ok: true, id: data.id, items: data.items || [] });
   } catch (err) {
     console.error("❌ Order error:", err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 }
 
-function normalize(text) {
-  return text
-    ?.toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[ł]/g, "l")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function levenshtein(a, b) {
-  const matrix = Array.from({ length: b.length + 1 }, (_, i) => [i]);
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      matrix[i][j] =
-        b.charAt(i - 1) === a.charAt(j - 1)
-          ? matrix[i - 1][j - 1]
-          : Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
-    }
-  }
-  return matrix[b.length][a.length];
-}
+// ✅ Funkcje normalize i levenshtein zaimportowane z helpers.js (deduplikacja)
 
 function findBestMatch(list, query, field = "name") {
-  const normQuery = normalize(query);
+  const normQuery = normalizeTxt(query);
   let best = null;
   let bestScore = Infinity;
   let exactMatch = null;
@@ -77,7 +60,7 @@ function findBestMatch(list, query, field = "name") {
   console.log(`🔍 Szukam "${query}" (znormalizowane: "${normQuery}") w ${list.length} pozycjach`);
 
   for (const el of list) {
-    const name = normalize(el[field]);
+    const name = normalizeTxt(el[field]);
     
     // Sprawdź dokładne dopasowanie (includes)
     if (name.includes(normQuery)) {
@@ -146,8 +129,8 @@ export default async function handler(req, res) {
   // GET - pobierz zamówienia
   if (req.method === 'GET') {
     try {
-      const { user_email, user_id } = req.query;
-      console.log('📋 Pobieram zamówienia dla:', { user_email, user_id });
+      const { user_email, user_id, restaurant_id } = req.query;
+      console.log('📋 Pobieram zamówienia dla:', { user_email, user_id, restaurant_id });
 
       let query = supabase
         .from('orders')
@@ -160,8 +143,10 @@ export default async function handler(req, res) {
         `)
         .order('created_at', { ascending: false });
       
-      // Używamy user_id jeśli dostępny, w przeciwnym razie user_email
-      if (user_id) {
+      // Filtruj według parametrów
+      if (restaurant_id) {
+        query = query.eq('restaurant_id', restaurant_id);
+      } else if (user_id) {
         query = query.eq('user_id', user_id);
       } else if (user_email) {
         // Dla kompatybilności - jeśli nie ma user_id, pobierz wszystkie zamówienia
@@ -187,6 +172,53 @@ export default async function handler(req, res) {
   // POST - utwórz zamówienie
   if (req.method === 'POST') {
     try {
+    // 🔥 Check if this is a cart order (from frontend)
+    if (req.body.restaurant_id && req.body.items && Array.isArray(req.body.items)) {
+      console.log('🛒 Cart order detected:', req.body);
+      
+      const { restaurant_id, items, user_id, restaurant_name, customer_name, customer_phone, delivery_address, notes, total_price } = req.body;
+      
+      if (!restaurant_id || !items?.length) {
+        return res.status(400).json({ error: "Incomplete cart order data" });
+      }
+      
+      const orderData = {
+        user_id: user_id || null,
+        restaurant_id: restaurant_id,
+        restaurant_name: restaurant_name || 'Unknown Restaurant',
+        items: items,
+        total_price: total_price || items.reduce((sum, item) => sum + (item.unit_price_cents * item.qty), 0),
+        status: "pending",
+        customer_name: customer_name || null,
+        customer_phone: customer_phone || null,
+        delivery_address: delivery_address || null,
+        notes: notes || null,
+        created_at: new Date().toISOString(),
+      };
+      
+      console.log('📝 Cart order data:', orderData);
+      
+      const { data: order, error: orderErr } = await supabase
+        .from('orders')
+        .insert([orderData])
+        .select()
+        .single();
+      
+      if (orderErr) {
+        console.error('❌ Cart order error:', orderErr);
+        return res.status(500).json({ error: orderErr.message });
+      }
+      
+      console.log('✅ Cart order created:', order.id);
+      return res.json({ 
+        ok: true, 
+        id: order.id, 
+        order: order,
+        message: 'Order created successfully' 
+      });
+    }
+    
+    // 🔥 Legacy order creation (voice commands)
     let { message, restaurant_name, user_email } = req.body;
     
     // Bezpieczny fallback dla undefined values
@@ -268,12 +300,16 @@ export default async function handler(req, res) {
     // Dodaj zamówienie
     console.log("💾 Tworzę zamówienie w bazie danych...");
     const orderData = {
-      user_id: user_id || null, // Use user_id from Supabase Auth
-      restaurant_id: restMatch.id, // Use restaurant_id instead of name
+      user_id: user_id || null,
+      restaurant_id: restMatch.id,
       restaurant_name: restMatch.name,
-      item_name: item.name,
-      price: item.price * quantity,
-      quantity,
+      dish_name: item.name,
+      total_price: item.price * quantity,
+      items: [{
+        name: item.name,
+        price: item.price,
+        quantity: quantity
+      }],
       status: "pending",
     };
     
@@ -319,6 +355,38 @@ export default async function handler(req, res) {
 
     } catch (err) {
       console.error('🔥 Błąd DELETE orders:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // PATCH - update order status
+  if (req.method === 'PATCH') {
+    try {
+      const orderId = req.url.split('/').pop();
+      const { status } = req.body;
+
+      if (!orderId || !status) {
+        return res.status(400).json({ error: 'Missing order ID or status' });
+      }
+
+      console.log(`📝 Updating order ${orderId} to status: ${status}`);
+
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ status })
+        .eq('id', orderId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Error updating order:', error);
+        return res.status(500).json({ error: error.message });
+      }
+
+      console.log('✅ Order updated successfully:', data);
+      return res.json({ ok: true, order: data });
+    } catch (err) {
+      console.error('🔥 Błąd PATCH orders:', err);
       return res.status(500).json({ error: err.message });
     }
   }
