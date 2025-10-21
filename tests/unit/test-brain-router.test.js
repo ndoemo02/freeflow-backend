@@ -181,3 +181,107 @@ describe('Edge Cases', () => {
     expect(boostIntent('Pokaż Menu', 'none', 0.5)).toBe('menu_request');
   });
 });
+
+describe('expectedContext Follow-up Logic', () => {
+  it('should detect show_more_options when expectedContext is set', () => {
+    const session = { expectedContext: 'show_more_options' };
+    expect(boostIntent('pokaż więcej', 'none', 0.5, session)).toBe('show_more_options');
+    expect(boostIntent('pokaż więcej opcji', 'none', 0.5, session)).toBe('show_more_options');
+    expect(boostIntent('pokaż wszystkie', 'none', 0.5, session)).toBe('show_more_options');
+    expect(boostIntent('pokaż pozostałe', 'none', 0.5, session)).toBe('show_more_options');
+    expect(boostIntent('więcej opcji', 'none', 0.5, session)).toBe('show_more_options');
+  });
+
+  it('should detect select_restaurant when expectedContext is set', () => {
+    const session = { expectedContext: 'select_restaurant' };
+    expect(boostIntent('wybieram', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('wybierz', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('ta pierwsza', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('ta druga', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('numer 1', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('numer 2', 'none', 0.5, session)).toBe('select_restaurant');
+    expect(boostIntent('2', 'none', 0.5, session)).toBe('select_restaurant');
+  });
+
+  it('should ignore expectedContext when user says something unrelated', () => {
+    const session = { expectedContext: 'show_more_options' };
+    // Użytkownik ignoruje pytanie i mówi coś zupełnie innego
+    expect(boostIntent('zamów taksówkę', 'none', 0.5, session)).not.toBe('show_more_options');
+    expect(boostIntent('pokaż menu', 'none', 0.5, session)).toBe('menu_request');
+  });
+
+  it('should not trigger expectedContext when session is null', () => {
+    expect(boostIntent('pokaż więcej', 'none', 0.5, null)).not.toBe('show_more_options');
+    expect(boostIntent('wybieram', 'none', 0.5, null)).not.toBe('select_restaurant');
+  });
+
+  it('should not trigger expectedContext when expectedContext is null', () => {
+    const session = { expectedContext: null };
+    expect(boostIntent('pokaż więcej', 'none', 0.5, session)).not.toBe('show_more_options');
+    expect(boostIntent('wybieram', 'none', 0.5, session)).not.toBe('select_restaurant');
+  });
+
+  it('should prioritize expectedContext over other patterns', () => {
+    const session = { expectedContext: 'show_more_options' };
+    // "pokaż więcej" normalnie mogłoby być interpretowane jako inne intencje,
+    // ale expectedContext ma najwyższy priorytet
+    expect(boostIntent('pokaż więcej', 'find_nearby', 0.5, session)).toBe('show_more_options');
+  });
+
+  it('should not override high confidence intents even with expectedContext', () => {
+    const session = { expectedContext: 'show_more_options' };
+    // Jeśli intencja ma wysoką pewność (≥0.8), nie powinna być nadpisana
+    expect(boostIntent('pokaż więcej', 'menu_request', 0.9, session)).toBe('menu_request');
+  });
+
+  it('should detect confirm_order when expectedContext is confirm_order', () => {
+    const session = { expectedContext: 'confirm_order' };
+    // Proste potwierdzenia
+    expect(boostIntent('tak', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('ok', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('dobrze', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('zgoda', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('pewnie', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('jasne', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('oczywiście', 'none', 0.5, session)).toBe('confirm_order');
+
+    // Potwierdzenia z "dodaj"
+    expect(boostIntent('dodaj', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('dodaj do koszyka', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('proszę dodać', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('dodaj proszę', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('tak dodaj', 'none', 0.5, session)).toBe('confirm_order');
+
+    // Potwierdzenia z "zamów"
+    expect(boostIntent('zamów', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('zamawiam', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('tak zamawiam', 'none', 0.5, session)).toBe('confirm_order');
+
+    // Potwierdzenia z "potwierdź"
+    expect(boostIntent('potwierdź', 'none', 0.5, session)).toBe('confirm_order');
+    expect(boostIntent('potwierdzam', 'none', 0.5, session)).toBe('confirm_order');
+  });
+
+  it('should detect cancel_order when expectedContext is confirm_order and user says "nie"', () => {
+    const session = { expectedContext: 'confirm_order' };
+    expect(boostIntent('nie', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('anuluj', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('nie chcę', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('nie chce', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('rezygnuję', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('rezygnuje', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('nie teraz', 'none', 0.5, session)).toBe('cancel_order');
+    expect(boostIntent('nie zamawiaj', 'none', 0.5, session)).toBe('cancel_order');
+  });
+
+  it('should not trigger confirm_order when expectedContext is different', () => {
+    const session = { expectedContext: 'show_more_options' };
+    // "tak" powinno być interpretowane jako "confirm", nie "confirm_order"
+    expect(boostIntent('tak', 'none', 0.5, session)).toBe('confirm');
+  });
+
+  it('should not trigger confirm_order when session is null', () => {
+    expect(boostIntent('tak', 'none', 0.5, null)).toBe('confirm');
+    expect(boostIntent('nie', 'none', 0.5, null)).toBe('change_restaurant');
+  });
+});

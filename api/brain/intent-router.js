@@ -164,6 +164,10 @@ async function loadMenuCatalog(session) {
   // preferuj ostatnią restaurację z kontekstu, jeśli jest
   const lastId = session?.lastRestaurant?.id || session?.restaurant?.id;
 
+  console.log(`[loadMenuCatalog] 🔍 Session:`, session);
+  console.log(`[loadMenuCatalog] 🔍 lastRestaurant:`, session?.lastRestaurant);
+  console.log(`[loadMenuCatalog] 🔍 lastId:`, lastId);
+
   try {
     let query = supabase
       .from('menu_items')
@@ -172,9 +176,9 @@ async function loadMenuCatalog(session) {
 
     if (lastId) {
       query = query.eq('restaurant_id', lastId);
-      console.log(`[intent-router] Loading menu for restaurant: ${lastId}`);
+      console.log(`[loadMenuCatalog] ✅ Loading menu for restaurant: ${lastId} (${session?.lastRestaurant?.name})`);
     } else {
-      console.log(`[intent-router] Loading all menu items (no restaurant in session)`);
+      console.log(`[loadMenuCatalog] ⚠️ Loading all menu items (no restaurant in session)`);
     }
 
     const { data: menuItems, error: menuError } = await query;
@@ -213,7 +217,8 @@ async function loadMenuCatalog(session) {
       restaurant_name: restaurantMap[mi.restaurant_id] || 'Unknown'
     }));
 
-    console.log(`[intent-router] Loaded ${catalog.length} menu items from ${restaurantIds.length} restaurants`);
+    console.log(`[loadMenuCatalog] ✅ Loaded ${catalog.length} menu items from ${restaurantIds.length} restaurants`);
+    console.log(`[loadMenuCatalog] ✅ Sample items:`, catalog.slice(0, 3).map(c => c.name).join(', '));
     return catalog;
   } catch (err) {
     console.error('[intent-router] loadMenuCatalog error:', err);
@@ -354,128 +359,94 @@ export async function detectIntent(text, session = null) {
 
     const lower = normalizeTxt(normalizedText);
 
-    // ——— CONFIRM FLOW V2 (with modify) ———
-    const confirmYes = [
-      "tak", "potwierdzam", "zamawiam", "poproszę", "oczywiście", "jasne", "dobrze"
-    ];
-    const confirmNo = [
-      "nie", "rezygnuję", "anuluj", "poczekaj", "nie teraz", "nie zamawiaj"
-    ];
-    const confirmModify = [
-      "coś innego", "inne", "zmień", "chciałbym coś innego", "inny zestaw"
-    ];
-
-    // Sprawdź confirm flow tylko jeśli jest oczekujące zamówienie
-    if (session?.lastPendingOrder) {
-      if (confirmYes.some(p => lower.includes(p))) {
-        const order = session.lastPendingOrder;
-        delete session.lastPendingOrder;
-        updateDebugSession({ 
-          intent: "confirm_yes", 
-          restaurant: order?.restaurant_name || null,
-          sessionId: session?.id || null,
-          confidence: 1.0
-        });
-        return {
-          intent: "confirm_yes",
-          order: order,
-          reply: `Świetnie! Zamówienie potwierdzone: ${order.items?.map(i => i.name).join(", ")}`,
-          confidence: 1.0
-        };
-      }
-      if (confirmNo.some(p => lower.includes(p))) {
-        delete session.lastPendingOrder;
-        updateDebugSession({ 
-          intent: "confirm_no", 
-          restaurant: null,
-          sessionId: session?.id || null,
-          confidence: 1.0
-        });
-        return {
-          intent: "confirm_no",
-          reply: "Okej, rezygnuję z zamówienia. Mogę Ci jeszcze w czymś pomóc?",
-          confidence: 1.0
-        };
-      }
-      if (confirmModify.some(p => lower.includes(p))) {
-        const oldOrder = session.lastPendingOrder;
-        delete session.lastPendingOrder;
-        updateDebugSession({ 
-          intent: "modify_order", 
-          restaurant: oldOrder?.restaurant_name || null,
-          sessionId: session?.id || null,
-          confidence: 1.0
-        });
-        return {
-          intent: "modify_order",
-          oldOrder: oldOrder,
-          reply: `Okej, zmieniam zamówienie. Co zamiast ${oldOrder.items?.map(i => i.name).join(", ")}?`,
-          confidence: 1.0
-        };
-      }
-    }
+    // ——— CONFIRM FLOW - DELEGATED TO boostIntent() in brainRouter.js ———
+    // Logika potwierdzania zamówień jest teraz obsługiwana przez:
+    // 1. boostIntent() w brainRouter.js (wykrywa confirm_order/cancel_order)
+    // 2. case "confirm_order" i "cancel_order" w brainRouter.js
+    // Ta sekcja została usunięta, aby uniknąć konfliktów z session.pendingOrder
 
     // ——— EARLY DISH DETECTION (PRIORITY 1) ———
     console.log('[intent-router] 🔍 Starting early dish detection for text:', text);
     console.log('[intent-router] 🔍 Normalized text:', normalizedText);
-    
-    // 🔹 KROK 1: Sprawdź czy w tekście jest nazwa restauracji
-    // Jeśli tak, załaduj menu z tej restauracji (nie z session)
+
+    // 🔹 KROK 1: Priorytetyzuj kontekst sesji
+    // Sprawdź czy użytkownik ma już restaurację w sesji
     let targetRestaurant = null;
-    
-    try {
-      const { data: restaurantsList } = await supabase
-        .from('restaurants')
-        .select('id, name');
+    const hasSessionRestaurant = session?.lastRestaurant?.id;
 
-      if (restaurantsList?.length) {
-        console.log(`[intent-router] 🔍 Checking ${restaurantsList.length} restaurants for fuzzy match`);
-        for (const r of restaurantsList) {
-          const normalizedName = normalizeTxt(r.name);
-          console.log(`[intent-router] 🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
+    console.log(`[intent-router] 🔍 Session restaurant: ${hasSessionRestaurant ? session.lastRestaurant.name : 'NONE'}`);
 
-          // Exact match
-          if (normalizedText.includes(normalizedName)) {
-            targetRestaurant = r;
-            console.log(`[intent-router] 🏪 Restaurant detected in text (exact): ${r.name}`);
-            break;
-          }
+    // 🔹 Sprawdź czy tekst zawiera silne wskaźniki nowej restauracji
+    const hasRestaurantIndicators = /\b(w|z|restauracja|restauracji|pizzeria|pizzerii|menu\s+w|menu\s+z)\b/i.test(normalizedText);
+    console.log(`[intent-router] 🔍 Restaurant indicators in text: ${hasRestaurantIndicators}`);
 
-          // Fuzzy match: sprawdź czy słowa z nazwy są w tekście (z Levenshtein distance)
-          const nameWords = normalizedName.split(' ');
-          const textWords = normalizedText.split(' ');
-          let matchedWords = 0;
-          console.log(`[intent-router] 🔍 Fuzzy match - name words: [${nameWords.join(', ')}], text words: [${textWords.join(', ')}]`);
+    // 🔹 Uruchom agresywne wykrywanie restauracji TYLKO jeśli:
+    // 1. NIE MA restauracji w sesji, LUB
+    // 2. Tekst zawiera silne wskaźniki nowej restauracji
+    const shouldSearchRestaurants = !hasSessionRestaurant || hasRestaurantIndicators;
 
-          for (const nameWord of nameWords) {
-            for (const textWord of textWords) {
-              const dist = levenshteinHelper(textWord, nameWord);
-              console.log(`[intent-router] 🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
-              if (textWord === nameWord || dist <= 1) {
-                matchedWords++;
-                console.log(`[intent-router] ✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
-                break;
+    if (shouldSearchRestaurants) {
+      console.log(`[intent-router] 🔍 Searching for restaurant in text (reason: ${!hasSessionRestaurant ? 'no session restaurant' : 'has indicators'})`);
+
+      try {
+        const { data: restaurantsList } = await supabase
+          .from('restaurants')
+          .select('id, name');
+
+        if (restaurantsList?.length) {
+          console.log(`[intent-router] 🔍 Checking ${restaurantsList.length} restaurants for fuzzy match`);
+          for (const r of restaurantsList) {
+            const normalizedName = normalizeTxt(r.name);
+            console.log(`[intent-router] 🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
+
+            // Exact match
+            if (normalizedText.includes(normalizedName)) {
+              targetRestaurant = r;
+              console.log(`[intent-router] 🏪 Restaurant detected in text (exact): ${r.name}`);
+              break;
+            }
+
+            // Fuzzy match: sprawdź czy słowa z nazwy są w tekście (z Levenshtein distance)
+            const nameWords = normalizedName.split(' ');
+            const textWords = normalizedText.split(' ');
+            let matchedWords = 0;
+            console.log(`[intent-router] 🔍 Fuzzy match - name words: [${nameWords.join(', ')}], text words: [${textWords.join(', ')}]`);
+
+            for (const nameWord of nameWords) {
+              for (const textWord of textWords) {
+                const dist = levenshteinHelper(textWord, nameWord);
+                console.log(`[intent-router] 🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
+                if (textWord === nameWord || dist <= 1) {
+                  matchedWords++;
+                  console.log(`[intent-router] ✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
+                  break;
+                }
               }
             }
-          }
 
-          const threshold = Math.ceil(nameWords.length / 2);
-          console.log(`[intent-router] 🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
-          
-          if (matchedWords >= threshold) {
-            targetRestaurant = r;
-            console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords}/${nameWords.length})`);
-            console.log(`[intent-router] 🏪 targetRestaurant set to:`, targetRestaurant);
-            break;
+            const threshold = Math.ceil(nameWords.length / 2);
+            console.log(`[intent-router] 🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
+
+            if (matchedWords >= threshold) {
+              targetRestaurant = r;
+              console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords}/${nameWords.length})`);
+              console.log(`[intent-router] 🏪 targetRestaurant set to:`, targetRestaurant);
+              break;
+            }
           }
+        } else {
+          console.log(`[intent-router] ❌ No restaurants found in database`);
         }
-      } else {
-        console.log(`[intent-router] ❌ No restaurants found in database`);
+      } catch (err) {
+        console.error('[intent-router] ❌ Error searching restaurants:', err);
       }
+    } else {
+      console.log(`[intent-router] ⏭️ Skipping restaurant search - using session restaurant: ${session.lastRestaurant.name}`);
+    }
 
-      // 🔹 KROK 2: Załaduj katalog menu
-      // Jeśli znaleziono restaurację w tekście, użyj jej
-      // W przeciwnym razie użyj session
+    // 🔹 KROK 2: Załaduj katalog menu
+    // Priorytet: targetRestaurant (z tekstu) > session.lastRestaurant
+    try {
       const sessionWithRestaurant = targetRestaurant
         ? { lastRestaurant: targetRestaurant }
         : session;
@@ -485,8 +456,11 @@ export async function detectIntent(text, session = null) {
 
       if (catalog.length) {
         console.log('[intent-router] 🔍 Calling parseOrderItems...');
+        console.log('[intent-router] 🔍 Catalog items:', catalog.map(c => c.name).join(', '));
         const parsed = parseOrderItems(normalizedText, catalog);
-        console.log(`[intent-router] Parsed result:`, parsed);
+        console.log(`[intent-router] ✅ Parsed result:`, JSON.stringify(parsed, null, 2));
+        console.log(`[intent-router] 🔍 parsed.any = ${parsed.any}`);
+        console.log(`[intent-router] 🔍 parsed.groups.length = ${parsed.groups?.length || 0}`);
 
         // Obsługa pustego menu
         if (parsed.missingAll) {
@@ -573,10 +547,12 @@ export async function detectIntent(text, session = null) {
         }
 
         if (parsed.any) {
-          console.log(`🍽️ Dish detected: ${parsed.groups.map(g => g.items.map(i => i.name).join(', ')).join(' | ')}`);
-          
-          updateDebugSession({ 
-            intent: 'create_order', 
+          console.log(`🍽️ ✅ EARLY DISH DETECTION SUCCESS! Dish detected: ${parsed.groups.map(g => g.items.map(i => i.name).join(', ')).join(' | ')}`);
+          console.log(`🍽️ ✅ Returning create_order immediately (HIGHEST PRIORITY)`);
+          console.log(`🍽️ ✅ parsedOrder:`, JSON.stringify(parsed, null, 2));
+
+          updateDebugSession({
+            intent: 'create_order',
             restaurant: parsed.groups[0]?.restaurant_name || null,
             sessionId: session?.id || null,
             confidence: 0.85
@@ -587,7 +563,8 @@ export async function detectIntent(text, session = null) {
             confidence: 0.85
           };
         } else {
-          console.log('[intent-router] No dishes matched in catalog');
+          console.log('[intent-router] ❌ No dishes matched in catalog (parsed.any = false)');
+          console.log('[intent-router] ❌ Continuing to KROK 4 (targetRestaurant check)...');
         }
       } else {
         console.log('[intent-router] Catalog is empty, skipping dish detection');
@@ -639,18 +616,19 @@ export async function detectIntent(text, session = null) {
 
     // 🔹 KROK 4: Jeśli w early dish detection znaleziono restaurację, ale nie znaleziono dań
     // to zwróć odpowiedni intent na podstawie słów kluczowych
-    console.log(`[intent-router] 🔍 Checking targetRestaurant:`, targetRestaurant);
+    console.log(`[intent-router] 🔍 KROK 4: Checking targetRestaurant:`, targetRestaurant);
     if (targetRestaurant) {
-      console.log(`[intent-router] 🏪 Restaurant found in early detection: ${targetRestaurant.name}, checking keywords...`);
-      console.log(`[intent-router] 🔍 Lower text: "${lower}"`);
-      console.log(`[intent-router] 🔍 Menu keywords:`, allMenuKeywords);
-      console.log(`[intent-router] 🔍 Order keywords:`, allOrderKeywords);
-      
+      console.log(`[intent-router] 🏪 KROK 4: Restaurant found in early detection: ${targetRestaurant.name}, checking keywords...`);
+      console.log(`[intent-router] 🔍 KROK 4: Lower text: "${lower}"`);
+      console.log(`[intent-router] 🔍 KROK 4: Menu keywords:`, allMenuKeywords);
+      console.log(`[intent-router] 🔍 KROK 4: Order keywords:`, allOrderKeywords);
+
       // Sprawdź słowa kluczowe
       if (allMenuKeywords.some(k => lower.includes(k))) {
-        console.log(`[intent-router] ✅ Menu keyword found, returning menu_request`);
-        updateDebugSession({ 
-          intent: 'menu_request', 
+        console.log(`[intent-router] ⚠️ KROK 4: Menu keyword found, returning menu_request`);
+        console.log(`[intent-router] ⚠️ KROK 4: This may override create_order from KROK 2!`);
+        updateDebugSession({
+          intent: 'menu_request',
           restaurant: targetRestaurant.name,
           sessionId: session?.id || null,
           confidence: 0.9

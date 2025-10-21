@@ -481,14 +481,60 @@ const nearbyCitySuggestions = {
  * @param {number} confidence - Pewność wykrycia (0-1)
  * @returns {string} - Zmodyfikowana lub oryginalna intencja
  */
-export function boostIntent(text, intent, confidence = 0) {
+export function boostIntent(text, intent, confidence = 0, session = null) {
   if (!text) return intent;
   const lower = normalizeTxt(text); // używamy normalizeTxt z intent-router (stripuje diacritics)
 
-  // Nie modyfikuj jeśli intencja jest bardzo pewna
+  // Nie modyfikuj jeśli intencja jest bardzo pewna (NAJWYŻSZY PRIORYTET)
   if (confidence >= 0.8) {
     console.log(`🧠 SmartContext: skipping boost (confidence=${confidence})`);
     return intent;
+  }
+
+  // 🧠 FOLLOW-UP CONTEXT LOGIC - DRUGI PRIORYTET
+  // Sprawdź oczekiwany kontekst PRZED innymi regułami semantycznymi
+  if (session?.expectedContext) {
+    console.log(`🧠 SmartContext: checking expected context: ${session.expectedContext}`);
+
+    // Oczekiwany kontekst: "pokaż więcej opcji"
+    if (session.expectedContext === 'show_more_options') {
+      // Używamy znormalizowanego tekstu (bez polskich znaków)
+      if (/(pokaz\s+wiecej|pokaz\s+wiecej\s+opcji|pokaz\s+wszystkie|pokaz\s+pozostale|pokaz\s+reste|wiecej\s+opcji)/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=show_more_options (expected context)');
+        return 'show_more_options';
+      }
+    }
+
+    // Oczekiwany kontekst: "wybierz restaurację"
+    if (session.expectedContext === 'select_restaurant') {
+      if (/(wybieram|wybierz|ta\s+pierwsza|ta\s+druga|ta\s+trzecia|numer\s+1|numer\s+2|numer\s+3|\d+)/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=select_restaurant (expected context)');
+        return 'select_restaurant';
+      }
+    }
+
+    // Oczekiwany kontekst: "potwierdź zamówienie" (NAJWYŻSZY PRIORYTET!)
+    if (session.expectedContext === 'confirm_order') {
+      console.log('🧠 SmartContext: expectedContext=confirm_order detected, checking user response...');
+
+      // Potwierdzenie - bardziej elastyczne dopasowanie
+      // Dopuszcza: "tak", "ok", "dodaj", "proszę dodać", "tak dodaj", "dodaj proszę", etc.
+      // Używamy `lower` (znormalizowany tekst bez polskich znaków) dla większości sprawdzeń
+      if (/(^|\s)(tak|ok|dobrze|zgoda|pewnie|jasne|oczywiscie)(\s|$)/i.test(lower) ||
+          /dodaj|dodac|zamow|zamawiam|potwierdz|potwierdzam/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=confirm_order (expected context, user confirmed)');
+        return 'confirm_order';
+      }
+
+      // Odrzucenie zamówienia
+      if (/(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(text) ||
+          /nie\s+(chce|chcę|teraz|zamawiaj)/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=cancel_order (expected context, user declined)');
+        return 'cancel_order';
+      }
+
+      console.log('⚠️ SmartContext: expectedContext=confirm_order but user response unclear, falling through...');
+    }
   }
 
   // Follow-up logic — krótkie odpowiedzi kontekstowe
@@ -785,7 +831,7 @@ export default async function handler(req, res) {
     if (parsedOrder?.any) {
       console.log('🔒 SmartContext: skipping boost (parsedOrder exists)');
     } else {
-      const boostedIntent = boostIntent(text, rawIntent, rawConfidence || 0.5);
+      const boostedIntent = boostIntent(text, rawIntent, rawConfidence || 0.5, currentSession);
       intent = boostedIntent;
       if (boostedIntent !== rawIntent) {
         console.log(`🌟 SmartContext: intent changed from "${rawIntent}" → "${boostedIntent}"`);
@@ -797,6 +843,7 @@ export default async function handler(req, res) {
     console.log('📋 Parsed:', parsed);
 
     // 🔹 Krok 2: zachowanie kontekstu
+    // NIE czyść expectedContext tutaj - zostanie to zrobione wewnątrz poszczególnych case'ów
     updateSession(sessionId, {
       lastIntent: intent,
       lastRestaurant: restaurant || prevRestaurant || null,
@@ -966,11 +1013,34 @@ export default async function handler(req, res) {
             (restaurants.length > requestedCount ? `\n\n(+${restaurants.length - requestedCount} więcej — powiedz "pokaż wszystkie")` : '') +
             '\n\nKtóre Cię interesuje?';
         }
+
+        // 🔹 Ustaw expectedContext i zapisz PEŁNĄ listę restauracji w sesji
+        if (restaurants.length > requestedCount) {
+          // Jeśli są więcej opcji do pokazania, ustaw kontekst "pokaż więcej"
+          updateSession(sessionId, {
+            expectedContext: 'show_more_options',
+            last_location: location,
+            lastCuisineType: cuisineType,
+            last_restaurants_list: restaurants // ✅ Zapisz PEŁNĄ listę (nie tylko displayRestaurants!)
+          });
+          console.log(`🧠 Set expectedContext=show_more_options for follow-up (saved ${restaurants.length} restaurants)`);
+        } else if (restaurants.length > 1) {
+          // Jeśli pokazano listę restauracji (więcej niż 1), ustaw kontekst "wybierz restaurację"
+          updateSession(sessionId, {
+            expectedContext: 'select_restaurant',
+            last_location: location,
+            lastCuisineType: cuisineType,
+            last_restaurants_list: restaurants // ✅ Zapisz PEŁNĄ listę (nie tylko displayRestaurants!)
+          });
+          console.log(`🧠 Set expectedContext=select_restaurant for follow-up (saved ${restaurants.length} restaurants)`);
+        }
         break;
       }
 
       case "menu_request": {
         console.log('🧠 menu_request intent detected');
+        // Wyczyść expectedContext (nowy kontekst rozmowy)
+        updateSession(sessionId, { expectedContext: null });
 
         // Jeśli w tekście padła nazwa restauracji, spróbuj ją znaleźć
         let verifiedRestaurant = null;
@@ -1052,15 +1122,40 @@ Co wybierasz?`;
 
       case "select_restaurant": {
         console.log('🧠 select_restaurant intent detected');
-        const name = restaurant?.name || parsed.restaurant || "";
+        // Wyczyść expectedContext (nowy kontekst rozmowy)
+        updateSession(sessionId, { expectedContext: null });
+        console.log('🧠 Cleared expectedContext after select_restaurant');
 
-        if (!name) {
-          console.warn('⚠️ No restaurant name provided');
-          replyCore = "Podaj pełną nazwę restauracji.";
-          break;
+        let matched = null;
+
+        // 🔹 Sprawdź, czy użytkownik podał numer (np. "numer 2", "ta pierwsza", "2")
+        const numberMatch = text.match(/(?:numer\s+)?(\d+)|(?:ta\s+)?(pierwsza|druga|trzecia|czwarta|piata|piąta)/i);
+        if (numberMatch && session?.last_restaurants_list?.length) {
+          const numberWords = { 'pierwsza': 1, 'druga': 2, 'trzecia': 3, 'czwarta': 4, 'piata': 5, 'piąta': 5 };
+          const index = numberMatch[1] ? parseInt(numberMatch[1]) - 1 : numberWords[numberMatch[2]?.toLowerCase()] - 1;
+
+          if (index >= 0 && index < session.last_restaurants_list.length) {
+            matched = session.last_restaurants_list[index];
+            console.log(`✅ Restaurant selected by number: ${matched.name} (index: ${index})`);
+          } else {
+            console.warn(`⚠️ Invalid restaurant number: ${index + 1} (max: ${session.last_restaurants_list.length})`);
+            replyCore = `Mam tylko ${session.last_restaurants_list.length} restauracji na liście. Wybierz numer od 1 do ${session.last_restaurants_list.length}.`;
+            break;
+          }
         }
 
-        const matched = await findRestaurant(name);
+        // 🔹 Jeśli nie wybrano po numerze, spróbuj po nazwie
+        if (!matched) {
+          const name = restaurant?.name || parsed.restaurant || "";
+
+          if (!name) {
+            console.warn('⚠️ No restaurant name provided');
+            replyCore = "Podaj pełną nazwę restauracji lub numer z listy.";
+            break;
+          }
+
+          matched = await findRestaurant(name);
+        }
 
         if (!matched) {
           console.warn(`⚠️ Restaurant "${name}" not found`);
@@ -1104,31 +1199,36 @@ Co wybierasz?`;
 
           replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
 
-          // Zwróć parsed_order w odpowiedzi (frontend użyje tego do dodania do CartContext)
-          return res.status(200).json({
-            ok: true,
-            intent: 'create_order',
-            restaurant: targetRestaurant,
-            parsed_order: {
-              restaurant: {
-                id: targetRestaurant.id,
-                name: targetRestaurant.name,
-                city: targetRestaurant.city
-              },
-              items: firstGroup.items.map(item => ({
-                id: item.menuItemId,
-                name: item.name,
-                price: item.price,
-                quantity: item.quantity
-              })),
-              total: total
+          // 🛒 Zapisz pendingOrder w sesji (NIE dodawaj do koszyka od razu!)
+          const pendingOrder = {
+            restaurant: {
+              id: targetRestaurant.id,
+              name: targetRestaurant.name,
+              city: targetRestaurant.city
             },
-            reply: replyCore,
-            confidence: 0.9,
-            fallback: false,
-            context: getSession(sessionId),
-            timestamp: new Date().toISOString(),
+            items: firstGroup.items.map(item => ({
+              id: item.menuItemId,
+              name: item.name,
+              price: item.price,
+              quantity: item.quantity
+            })),
+            total: total
+          };
+
+          // Ustaw expectedContext na 'confirm_order' i zapisz pendingOrder
+          updateSession(sessionId, {
+            expectedContext: 'confirm_order',
+            pendingOrder: pendingOrder
           });
+
+          console.log('✅ Pending order saved to session:');
+          console.log('   - expectedContext: confirm_order');
+          console.log('   - pendingOrder items count:', pendingOrder.items.length);
+          console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
+          console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
+          console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
+          console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
+          break;
         }
 
         // FALLBACK: Stara logika (jeśli parsedOrder nie jest dostępny)
@@ -1185,7 +1285,6 @@ Co wybierasz?`;
         // Oblicz total
         const total = parsedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
-        // 🎯 Zwróć parsed order do frontendu (zamiast zapisywać do bazy)
         console.log(`✅ Parsed order:`, parsedItems);
 
         // Sformatuj odpowiedź
@@ -1195,31 +1294,38 @@ Co wybierasz?`;
 
         replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
 
-        // Zwróć parsed_order w odpowiedzi (frontend użyje tego do dodania do CartContext)
-        return res.status(200).json({
-          ok: true,
-          intent: 'create_order',
-          restaurant: current,
-          parsed_order: {
-            restaurant: {
-              id: current.id,
-              name: current.name,
-              city: current.city
-            },
-            items: parsedItems,
-            total: total
+        // 🛒 Zapisz pendingOrder w sesji (NIE dodawaj do koszyka od razu!)
+        const pendingOrder = {
+          restaurant: {
+            id: current.id,
+            name: current.name,
+            city: current.city
           },
-          reply: replyCore,
-          confidence: 0.9,
-          fallback: false,
-          context: getSession(sessionId),
-          timestamp: new Date().toISOString(),
+          items: parsedItems,
+          total: total
+        };
+
+        // Ustaw expectedContext na 'confirm_order' i zapisz pendingOrder
+        updateSession(sessionId, {
+          expectedContext: 'confirm_order',
+          pendingOrder: pendingOrder
         });
+
+        console.log('✅ Pending order saved to session (fallback path):');
+        console.log('   - expectedContext: confirm_order');
+        console.log('   - pendingOrder items count:', pendingOrder.items.length);
+        console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
+        console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
+        console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
+        console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
+        break;
       }
 
       // 🌟 SmartContext v3.1: Recommend (top-rated restaurants)
       case "recommend": {
         console.log('🌟 recommend intent detected');
+        // Wyczyść expectedContext (nowy kontekst rozmowy)
+        updateSession(sessionId, { expectedContext: null });
 
         const cuisineType = extractCuisineType(text);
         let query = supabase
@@ -1265,6 +1371,8 @@ Co wybierasz?`;
       // 🌟 SmartContext v3.1: Confirm (follow-up "tak")
       case "confirm": {
         console.log('🌟 confirm intent detected');
+        // Wyczyść expectedContext (nowy kontekst rozmowy)
+        updateSession(sessionId, { expectedContext: null });
 
         if (prevRestaurant) {
           replyCore = `Super! Przechodzę do menu ${prevRestaurant.name}. Co chcesz zamówić?`;
@@ -1274,9 +1382,94 @@ Co wybierasz?`;
         break;
       }
 
+      // 🛒 Confirm Order (potwierdzenie dodania do koszyka)
+      case "confirm_order": {
+        console.log('🛒 confirm_order intent detected');
+
+        // Pobierz pendingOrder z sesji
+        const session = getSession(sessionId);
+        const pendingOrder = session?.pendingOrder;
+
+        console.log('🔍 Checking session for pendingOrder...');
+        console.log('   - sessionId:', sessionId);
+        console.log('   - session exists:', !!session);
+        console.log('   - pendingOrder exists:', !!pendingOrder);
+
+        if (!pendingOrder) {
+          console.warn('⚠️ No pending order in session - user may have said "tak" without prior order');
+          console.warn('   - expectedContext was:', session?.expectedContext);
+          replyCore = "Nie mam żadnego zamówienia do potwierdzenia. Co chcesz zamówić?";
+          break;
+        }
+
+        console.log('✅ Confirming pending order:');
+        console.log('   - restaurant:', pendingOrder.restaurant.name);
+        console.log('   - items count:', pendingOrder.items.length);
+        console.log('   - items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
+        console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
+        console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
+
+        // Wyczyść expectedContext i pendingOrder z sesji
+        updateSession(sessionId, {
+          expectedContext: null,
+          pendingOrder: null
+        });
+
+        console.log('✅ Session cleared: expectedContext=null, pendingOrder=null');
+        console.log('📦 Returning parsed_order to frontend for cart update');
+
+        // Zwróć parsed_order do frontendu (frontend doda do koszyka)
+        return res.status(200).json({
+          ok: true,
+          intent: 'confirm_order',
+          restaurant: pendingOrder.restaurant,
+          parsed_order: pendingOrder,
+          reply: `Dodaję do koszyka! Razem ${pendingOrder.total.toFixed(2)} zł.`,
+          confidence: 1.0,
+          fallback: false,
+          context: getSession(sessionId),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // 🛒 Cancel Order (anulowanie zamówienia)
+      case "cancel_order": {
+        console.log('🛒 cancel_order intent detected');
+
+        // Pobierz pendingOrder z sesji
+        const session = getSession(sessionId);
+        const pendingOrder = session?.pendingOrder;
+
+        console.log('🔍 Checking session for pendingOrder to cancel...');
+        console.log('   - sessionId:', sessionId);
+        console.log('   - pendingOrder exists:', !!pendingOrder);
+
+        if (!pendingOrder) {
+          console.warn('⚠️ No pending order to cancel - user may have said "nie" without prior order');
+          replyCore = "Nie mam żadnego zamówienia do anulowania.";
+          break;
+        }
+
+        console.log('✅ Cancelling pending order:');
+        console.log('   - items:', pendingOrder.items.map(i => i.name).join(', '));
+
+        // Wyczyść expectedContext i pendingOrder z sesji
+        updateSession(sessionId, {
+          expectedContext: null,
+          pendingOrder: null
+        });
+
+        console.log('✅ Session cleared: expectedContext=null, pendingOrder=null');
+
+        replyCore = "Okej, anulowałam zamówienie. Co chcesz zamówić?";
+        break;
+      }
+
       // 🌟 SmartContext v3.1: Change Restaurant (follow-up "nie/inne")
       case "change_restaurant": {
         console.log('🌟 change_restaurant intent detected');
+        // Wyczyść expectedContext (nowy kontekst rozmowy)
+        updateSession(sessionId, { expectedContext: null });
 
         if (prevLocation) {
           const otherRestaurants = await findRestaurantsByLocation(prevLocation);
@@ -1299,6 +1492,53 @@ Co wybierasz?`;
         } else {
           replyCore = "Jaką lokalizację chcesz sprawdzić?";
         }
+        break;
+      }
+
+      // 🌟 SmartContext v3.1: Show More Options (follow-up context)
+      case "show_more_options": {
+        console.log('🌟 show_more_options intent detected');
+
+        // 🔹 Pobierz pełną listę restauracji z sesji (NIE wywołuj ponownie findRestaurantsByLocation!)
+        const lastRestaurantsList = session?.last_restaurants_list;
+        const lastLocation = session?.last_location || prevLocation;
+        const lastCuisineType = session?.lastCuisineType || null;
+
+        if (!lastRestaurantsList || !lastRestaurantsList.length) {
+          console.warn('⚠️ show_more_options: brak last_restaurants_list w sesji');
+          replyCore = "Nie pamiętam, jakie restauracje pokazywałem. Powiedz mi, gdzie chcesz zjeść.";
+          break;
+        }
+
+        console.log(`✅ show_more_options: znaleziono ${lastRestaurantsList.length} restauracji w sesji`);
+
+        // Pokaż wszystkie restauracje z sesji (bez limitu 3)
+        const locationInfo = lastLocation ? ` w ${lastLocation}` : ' w pobliżu';
+        const countText = lastRestaurantsList.length === 1 ? 'miejsce' :
+                         lastRestaurantsList.length < 5 ? 'miejsca' : 'miejsc';
+
+        replyCore = `Oto wszystkie ${lastRestaurantsList.length} ${countText}${locationInfo}:\n` +
+          lastRestaurantsList.map((r, i) => {
+            let distanceStr = '';
+            if (r.distance && r.distance < 999) {
+              if (r.distance < 1) {
+                distanceStr = ` (${Math.round(r.distance * 1000)} metrów)`;
+              } else {
+                distanceStr = ` (${r.distance.toFixed(1)} kilometra)`;
+              }
+            }
+            return `${i+1}. ${r.name}${r.cuisine_type ? ` - ${r.cuisine_type}` : ''}${distanceStr}`;
+          }).join('\n') +
+          '\n\nKtóre Cię interesuje?';
+
+        // 🔹 Ustaw expectedContext na 'select_restaurant' po pokazaniu pełnej listy
+        updateSession(sessionId, {
+          expectedContext: 'select_restaurant',
+          last_location: lastLocation,
+          lastCuisineType: lastCuisineType,
+          last_restaurants_list: lastRestaurantsList // Zachowaj pełną listę
+        });
+        console.log('🧠 Set expectedContext=select_restaurant after show_more_options');
         break;
       }
 

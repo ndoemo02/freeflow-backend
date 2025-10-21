@@ -21,6 +21,7 @@ export default async function handler(req, res) {
       lastIntent: intent || prev.lastIntent || "unknown",
       lastRestaurant: restaurant || prev.lastRestaurant || null,
       lastItems: items?.length ? items : prev.lastItems || [],
+      expectedContext: prev.expectedContext || null, // Oczekiwany kontekst follow-up
       lastUpdated: Date.now()
     };
 
