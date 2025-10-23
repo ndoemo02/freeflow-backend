@@ -779,6 +779,33 @@ function extractCuisineType(text) {
 }
 
 /**
+ * Timeout wrapper for async operations
+ * @param {Promise} promise - Promise to wrap
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {string} operationName - Name for logging
+ * @returns {Promise} - Resolves with result or rejects on timeout
+ */
+async function withTimeout(promise, timeoutMs, operationName) {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`⏱️ Timeout: ${operationName} exceeded ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  const startTime = Date.now();
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    const duration = Date.now() - startTime;
+    if (duration > 2000) {
+      console.warn(`⚠️ Slow operation: ${operationName} took ${duration}ms`);
+    }
+    return result;
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    console.error(`❌ ${operationName} failed after ${duration}ms:`, err.message);
+    throw err;
+  }
+}
+
+/**
  * Znajduje restauracje w danej lokalizacji używając fuzzy matching
  * @param {string} location - Nazwa miasta/lokalizacji
  * @param {string|null} cuisineType - Opcjonalny typ kuchni do filtrowania (może być alias)
@@ -820,7 +847,12 @@ async function findRestaurantsByLocation(location, cuisineType = null, session =
       }
     }
 
-    const { data: restaurants, error } = await query.limit(10);
+    // 🔹 Timeout protection: 4s max dla location query
+    const { data: restaurants, error } = await withTimeout(
+      query.limit(10),
+      4000,
+      `findRestaurantsByLocation("${location}"${cuisineType ? `, cuisine: ${cuisineType}` : ''})`
+    );
 
     if (error) {
       console.error('⚠️ findRestaurantsByLocation error:', error.message);
@@ -1073,10 +1105,16 @@ export default async function handler(req, res) {
         console.log('🧠 find_nearby intent detected');
 
         // 🧭 GeoContext Layer: sprawdź czy w tekście jest lokalizacja
-        const location = extractLocation(text);
+        let location = extractLocation(text);
         // 🍕 Cuisine Filter: sprawdź czy w tekście jest typ kuchni
         const cuisineType = extractCuisineType(text);
         let restaurants = null;
+
+        // 🔹 OPTIMIZATION: Fallback do session.last_location jeśli brak lokalizacji w tekście
+        if (!location && prevLocation) {
+          console.log(`📍 Using last known location: "${prevLocation}"`);
+          location = prevLocation;
+        }
 
         if (location) {
           console.log(`🧭 GeoContext active: searching in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
@@ -1088,6 +1126,11 @@ export default async function handler(req, res) {
             updateSession(sessionId, { last_location: location });
             console.log(`✅ GeoContext: ${restaurants.length} restaurants found in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
           }
+        } else {
+          // 🔹 Dodatkowa walidacja: jeśli brak lokalizacji, zwróć błąd
+          console.log(`⚠️ No location found in text and no session.last_location available`);
+          replyCore = "Brak lokalizacji. Podaj nazwę miasta lub powiedz 'w pobliżu'.";
+          break;
         }
 
         // Fallback: jeśli brak lokalizacji lub brak wyników, pobierz wszystkie

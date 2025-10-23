@@ -211,7 +211,20 @@ async function loadMenuCatalog(session) {
       console.log(`[loadMenuCatalog] ⚠️ Loading all menu items (no restaurant in session)`);
     }
 
-    const { data: menuItems, error: menuError } = await query;
+    // 🔹 Timeout protection: 3s max dla menu query
+    const startTime = Date.now();
+    const { data: menuItems, error: menuError } = await Promise.race([
+      query,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Menu query timeout (3s)')), 3000)
+      )
+    ]);
+
+    const queryDuration = Date.now() - startTime;
+    if (queryDuration > 1000) {
+      console.warn(`⚠️ Slow menu query: ${queryDuration}ms`);
+    }
+
     if (menuError) {
       console.error('[intent-router] menu load error', menuError);
       return [];
@@ -224,10 +237,23 @@ async function loadMenuCatalog(session) {
 
     // Pobierz nazwy restauracji
     const restaurantIds = [...new Set(menuItems.map(mi => mi.restaurant_id))];
-    const { data: restaurants, error: restError } = await supabase
-      .from('restaurants')
-      .select('id,name')
-      .in('id', restaurantIds);
+
+    // 🔹 Timeout protection: 2s max dla restaurants query
+    const restStartTime = Date.now();
+    const { data: restaurants, error: restError } = await Promise.race([
+      supabase
+        .from('restaurants')
+        .select('id,name')
+        .in('id', restaurantIds),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Restaurants query timeout (2s)')), 2000)
+      )
+    ]);
+
+    const restQueryDuration = Date.now() - restStartTime;
+    if (restQueryDuration > 1000) {
+      console.warn(`⚠️ Slow restaurants query: ${restQueryDuration}ms`);
+    }
 
     if (restError) {
       console.error('[intent-router] restaurants load error', restError);
@@ -251,7 +277,7 @@ async function loadMenuCatalog(session) {
     console.log(`[loadMenuCatalog] ✅ Sample items:`, catalog.slice(0, 3).map(c => c.name).join(', '));
     return catalog;
   } catch (err) {
-    console.error('[intent-router] loadMenuCatalog error:', err);
+    console.error('[intent-router] loadMenuCatalog error:', err.message);
     return [];
   }
 }
@@ -401,9 +427,36 @@ export function parseOrderItems(text, catalog) {
   };
 }
 
+/**
+ * Timeout wrapper for async operations
+ * @param {Promise} promise - Promise to wrap
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @param {string} operationName - Name for logging
+ * @returns {Promise} - Resolves with result or rejects on timeout
+ */
+async function withTimeout(promise, timeoutMs, operationName) {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`⏱️ Timeout: ${operationName} exceeded ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  const startTime = Date.now();
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    const duration = Date.now() - startTime;
+    if (duration > 2000) {
+      console.warn(`⚠️ Slow operation: ${operationName} took ${duration}ms`);
+    }
+    return result;
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    console.error(`❌ ${operationName} failed after ${duration}ms:`, err.message);
+    throw err;
+  }
+}
+
 export async function detectIntent(text, session = null) {
   console.log('[intent-router] 🚀 detectIntent called with:', { text, sessionId: session?.id });
-  
+
   if (!text) {
     updateDebugSession({ intent: 'none', restaurant: null, sessionId: session?.id || null });
     return { intent: 'none', restaurant: null };
@@ -433,6 +486,7 @@ export async function detectIntent(text, session = null) {
     // 🔹 KROK 1: Priorytetyzuj kontekst sesji
     // Sprawdź czy użytkownik ma już restaurację w sesji
     let targetRestaurant = null;
+    let restaurantsList = null; // 🔹 Cache dla późniejszego użycia
     const hasSessionRestaurant = session?.lastRestaurant?.id;
 
     console.log(`[intent-router] 🔍 Session restaurant: ${hasSessionRestaurant ? session.lastRestaurant.name : 'NONE'}`);
@@ -450,56 +504,72 @@ export async function detectIntent(text, session = null) {
       console.log(`[intent-router] 🔍 Searching for restaurant in text (reason: ${!hasSessionRestaurant ? 'no session restaurant' : 'has indicators'})`);
 
       try {
-        const { data: restaurantsList } = await supabase
+        // 🔹 Timeout protection: 3s max dla query
+        const restaurantsQuery = supabase
           .from('restaurants')
           .select('id, name');
 
+        const { data } = await withTimeout(
+          restaurantsQuery,
+          3000,
+          'restaurants query in detectIntent'
+        );
+
+        restaurantsList = data; // 🔹 Zapisz do cache
+
         if (restaurantsList?.length) {
           console.log(`[intent-router] 🔍 Checking ${restaurantsList.length} restaurants for fuzzy match`);
+
+          // 🔹 Early exit: sprawdź najpierw exact match (szybkie)
           for (const r of restaurantsList) {
             const normalizedName = normalizeTxt(r.name);
-            console.log(`[intent-router] 🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
-
-            // Exact match
             if (normalizedText.includes(normalizedName)) {
               targetRestaurant = r;
               console.log(`[intent-router] 🏪 Restaurant detected in text (exact): ${r.name}`);
-              break;
+              break; // 🔹 Early exit
             }
+          }
 
-            // Fuzzy match: sprawdź czy słowa z nazwy są w tekście (z Levenshtein distance)
-            const nameWords = normalizedName.split(' ');
+          // 🔹 Fuzzy match tylko jeśli exact match nie zadziałał
+          if (!targetRestaurant) {
             const textWords = normalizedText.split(' ');
-            let matchedWords = 0;
-            console.log(`[intent-router] 🔍 Fuzzy match - name words: [${nameWords.join(', ')}], text words: [${textWords.join(', ')}]`);
 
-            for (const nameWord of nameWords) {
-              for (const textWord of textWords) {
-                const dist = levenshteinHelper(textWord, nameWord);
-                console.log(`[intent-router] 🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
-                if (textWord === nameWord || dist <= 1) {
+            for (const r of restaurantsList) {
+              const normalizedName = normalizeTxt(r.name);
+              const nameWords = normalizedName.split(' ');
+              let matchedWords = 0;
+
+              for (const nameWord of nameWords) {
+                // 🔹 Optymalizacja: sprawdź najpierw exact match słowa (szybkie)
+                if (textWords.includes(nameWord)) {
                   matchedWords++;
-                  console.log(`[intent-router] ✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
-                  break;
+                  continue;
+                }
+
+                // 🔹 Levenshtein tylko jeśli exact match nie zadziałał
+                for (const textWord of textWords) {
+                  const dist = levenshteinHelper(textWord, nameWord);
+                  if (dist <= 1) {
+                    matchedWords++;
+                    break; // 🔹 Early exit z inner loop
+                  }
                 }
               }
-            }
 
-            const threshold = Math.ceil(nameWords.length / 2);
-            console.log(`[intent-router] 🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
-
-            if (matchedWords >= threshold) {
-              targetRestaurant = r;
-              console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords}/${nameWords.length})`);
-              console.log(`[intent-router] 🏪 targetRestaurant set to:`, targetRestaurant);
-              break;
+              const threshold = Math.ceil(nameWords.length / 2);
+              if (matchedWords >= threshold) {
+                targetRestaurant = r;
+                console.log(`[intent-router] 🏪 Restaurant detected in text (fuzzy): ${r.name} (matched: ${matchedWords}/${nameWords.length})`);
+                break; // 🔹 Early exit
+              }
             }
           }
         } else {
           console.log(`[intent-router] ❌ No restaurants found in database`);
         }
       } catch (err) {
-        console.error('[intent-router] ❌ Error searching restaurants:', err);
+        console.error('[intent-router] ❌ Error searching restaurants:', err.message);
+        // 🔹 Nie rzucaj błędu - kontynuuj z session restaurant
       }
     } else {
       console.log(`[intent-router] ⏭️ Skipping restaurant search - using session restaurant: ${session.lastRestaurant.name}`);
@@ -512,7 +582,12 @@ export async function detectIntent(text, session = null) {
         ? { lastRestaurant: targetRestaurant }
         : session;
 
-      const catalog = await loadMenuCatalog(sessionWithRestaurant);
+      // 🔹 Timeout protection: 5s max dla loadMenuCatalog
+      const catalog = await withTimeout(
+        loadMenuCatalog(sessionWithRestaurant),
+        5000,
+        'loadMenuCatalog in detectIntent'
+      );
       console.log(`[intent-router] Catalog loaded: ${catalog.length} items`);
 
       if (catalog.length) {
@@ -526,8 +601,8 @@ export async function detectIntent(text, session = null) {
         // Obsługa pustego menu
         if (parsed.missingAll) {
           console.log('⚠️ No menu items found in catalog');
-          updateDebugSession({ 
-            intent: 'no_menu_items', 
+          updateDebugSession({
+            intent: 'no_menu_items',
             restaurant: null,
             sessionId: session?.id || null,
             confidence: 0.8
@@ -547,52 +622,50 @@ export async function detectIntent(text, session = null) {
           const missing = parsed.unavailable.join(', ');
           const restaurantName = session?.lastRestaurant?.name || 'tym menu';
           console.log(`⚠️ Unavailable items detected: ${missing} in ${restaurantName}`);
-          
-          // Sprawdź czy tekst zawiera nazwę restauracji (może to być nazwa restauracji, a nie zamówienie)
+
+          // 🔹 OPTIMIZATION: Użyj cache z KROK 1 zamiast robić nowy query
           let containsRestaurantName = false;
-          const { data: restaurantsCheck } = await supabase
-            .from('restaurants')
-            .select('id, name');
-          
-          console.log(`🔍 Checking if text contains restaurant name: "${normalizedText}"`);
-          
-          if (restaurantsCheck?.length) {
-            for (const r of restaurantsCheck) {
+
+          if (restaurantsList?.length) {
+            console.log(`🔍 Checking if text contains restaurant name (using cached list): "${normalizedText}"`);
+            const textWords = normalizedText.split(' ');
+
+            for (const r of restaurantsList) {
               const normalizedName = normalizeTxt(r.name);
               const nameWords = normalizedName.split(' ');
-              const textWords = normalizedText.split(' ');
               let matchedWords = 0;
 
-              console.log(`🔍 Checking restaurant: ${r.name} -> ${normalizedName}`);
-              console.log(`🔍 Name words: [${nameWords.join(', ')}], Text words: [${textWords.join(', ')}]`);
-
+              // 🔹 Optymalizacja: exact match najpierw
               for (const nameWord of nameWords) {
-                for (const textWord of textWords) {
-                  const dist = levenshteinHelper(textWord, nameWord);
-                  console.log(`🔍 Comparing: "${textWord}" vs "${nameWord}" distance: ${dist}`);
-                  if (textWord === nameWord || dist <= 1) {
-                    matchedWords++;
-                    console.log(`✅ Word match! Total: ${matchedWords}/${nameWords.length}`);
-                    break;
+                if (textWords.includes(nameWord)) {
+                  matchedWords++;
+                } else {
+                  // Levenshtein tylko jeśli exact match nie zadziałał
+                  for (const textWord of textWords) {
+                    const dist = levenshteinHelper(textWord, nameWord);
+                    if (dist <= 1) {
+                      matchedWords++;
+                      break;
+                    }
                   }
                 }
               }
 
               const threshold = Math.ceil(nameWords.length / 2);
-              console.log(`🔍 Matched: ${matchedWords}/${nameWords.length}, threshold: ${threshold}`);
-              
               if (matchedWords >= threshold) {
                 containsRestaurantName = true;
                 console.log(`✅ Text contains restaurant name: ${r.name} — skipping clarify_order`);
                 break;
               }
             }
+          } else {
+            console.log(`⚠️ No cached restaurants list - skipping restaurant name check`);
           }
 
           // Jeśli tekst NIE zawiera nazwy restauracji, to zwróć clarify_order
           if (!containsRestaurantName) {
-            updateDebugSession({ 
-              intent: 'clarify_order', 
+            updateDebugSession({
+              intent: 'clarify_order',
               restaurant: restaurantName,
               sessionId: session?.id || null,
               confidence: 0.9
@@ -637,7 +710,7 @@ export async function detectIntent(text, session = null) {
     // 🔹 KROK 3: Przygotuj słowa kluczowe (przed sprawdzeniem targetRestaurant)
     // Bazowe słowa kluczowe (BEZ polskich znaków - znormalizowane przez normalizeTxt)
     const findNearbyKeywords = [
-      'zjesc', 'restaurac', 'pizza', 'pizze', 'kebab', 'burger', 'zjesc cos', 'gdzie',
+      'zjesc', 'restaurac', 'restauracje', 'pokaz restauracje', 'pizza', 'pizze', 'kebab', 'burger', 'zjesc cos', 'gdzie',
       'w okolicy', 'blisko', 'cos do jedzenia', 'posilek', 'obiad',
       'gdzie zjem', 'co polecasz', 'restauracje w poblizu',
       'mam ochote', 'ochote na', 'chce cos', 'chce pizze', 'chce kebab', 'chce burger',
@@ -736,10 +809,15 @@ export async function detectIntent(text, session = null) {
     // 🔹 PRIORYTET 1: Sprawdź czy w tekście jest nazwa restauracji (fuzzy matching)
     // Jeśli tak, to najprawdopodobniej user chce wybrać restaurację lub zobaczyć menu
     console.log('🔍 PRIORYTET 1: Sprawdzam restauracje w tekście:', text);
-    const { data: restaurantsList } = await supabase
-      .from('restaurants')
-      .select('id, name');
-    
+
+    // 🔹 Użyj cache z KROK 1 jeśli dostępny, w przeciwnym razie pobierz
+    if (!restaurantsList) {
+      const { data } = await supabase
+        .from('restaurants')
+        .select('id, name');
+      restaurantsList = data;
+    }
+
     console.log('🔍 Znaleziono restauracji:', restaurantsList?.length || 0);
 
     if (restaurantsList?.length) {
