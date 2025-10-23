@@ -18,6 +18,8 @@
     "test:integration": "vitest run tests/integration",
     "test:e2e": "vitest run tests/e2e",
     "test:performance": "vitest run tests/performance",
+    "test:lastLocation": "vitest tests/brain-cascade.test.js -t \"should remember last location\" --run",
+    "test:critical": "vitest tests/brain-cascade.test.js -t \"Tier 11\" --run",
     "test:parse": "node tests/test-parse.js",
     "test:brain": "node run-brain-tests.js",
     "test:orders": "npx vitest tests/orders-api.test.js --run"
