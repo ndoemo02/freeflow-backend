@@ -48,6 +48,22 @@ app.post("/api/brain", async (req, res) => {
   }
 });
 
+    // Optional: reset session endpoint
+    app.post("/api/brain/reset", async (req, res) => {
+      try {
+        const { getSession } = await import("./brain/context.js");
+        const { updateSession } = await import("./brain/context.js");
+        const body = req.body || {};
+        const sessionId = body.sessionId;
+        if (!sessionId) return res.status(400).json({ ok: false, error: 'missing_sessionId' });
+        updateSession(sessionId, { expectedContext: null, lastRestaurant: null, pendingOrder: null, last_restaurants_list: null });
+        res.json({ ok: true, cleared: true, session: getSession(sessionId) });
+      } catch (e) {
+        console.error('reset error', e);
+        res.status(500).json({ ok: false, error: e.message });
+      }
+    });
+
 app.post("/api/brain/router", async (req, res) => {
   try {
     const brainRouter = await import("./brain/brainRouter.js");

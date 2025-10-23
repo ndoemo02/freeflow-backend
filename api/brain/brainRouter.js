@@ -4,7 +4,7 @@ import { supabase } from "../_supabase.js";
 import { getSession, updateSession } from "./context.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4o";
+const MODEL = "gpt-5";
 
 // --- Validation Functions ---
 
@@ -557,37 +557,53 @@ const nearbyCitySuggestions = {
 export function boostIntent(text, intent, confidence = 0, session = null) {
   if (!text) return intent;
   const lower = normalizeTxt(text); // używamy normalizeTxt z intent-router (stripuje diacritics)
+  const ctx = session || {};
 
-  // Nie modyfikuj jeśli intencja jest bardzo pewna (NAJWYŻSZY PRIORYTET)
-  if (confidence >= 0.8) {
-    console.log(`🧠 SmartContext: skipping boost (confidence=${confidence})`);
-    return intent;
+  // --- Global short-circuits for concise follow-ups ---
+  // 1) "pokaż więcej / inne" → show_more_options (niezależnie od kontekstu)
+  const moreAnyRx = /\b(pokaz\s*(wiecej|reszte)|wiecej|inne|pokaz\s*opcje)\b/i;
+  if (moreAnyRx.test(lower)) {
+    console.log('🧠 SmartContext (global) → intent=show_more_options (phrase: "pokaż więcej/inn(e)")');
+    return 'show_more_options';
+  }
+
+  // 2) "wybieram numer 1" / liczebnik porządkowy / sama cyfra → select_restaurant
+  const numberOnlyMatch = text.trim().match(/^\s*([1-9])\s*$/);
+  const ordinalPlAny = /(pierwsza|pierwszy|druga|drugi|trzecia|trzeci|czwarta|czwarty|piata|piaty|szosta|szosty|siodma|siodmy|osma|osmy|dziewiata|dziewiaty)/i;
+  if (numberOnlyMatch || ordinalPlAny.test(lower) || /\b(wybieram|wybierz)\b/i.test(lower) || /\bnumer\s+[1-9]\b/i.test(lower)) {
+    console.log('🧠 SmartContext (global) → intent=select_restaurant (phrase: number/ordinal)');
+    return 'select_restaurant';
   }
 
   // 🧠 FOLLOW-UP CONTEXT LOGIC - DRUGI PRIORYTET
   // Sprawdź oczekiwany kontekst PRZED innymi regułami semantycznymi
-  if (session?.expectedContext) {
-    console.log(`🧠 SmartContext: checking expected context: ${session.expectedContext}`);
+  if (ctx?.expectedContext) {
+    console.log(`🧠 SmartContext: checking expected context: ${ctx.expectedContext}`);
 
     // Oczekiwany kontekst: "pokaż więcej opcji"
-    if (session.expectedContext === 'show_more_options') {
-      // Używamy znormalizowanego tekstu (bez polskich znaków)
-      if (/(pokaz\s+wiecej|pokaz\s+wiecej\s+opcji|pokaz\s+wszystkie|pokaz\s+pozostale|pokaz\s+reszte|wiecej\s+opcji)/i.test(lower)) {
+    if (ctx.expectedContext === 'show_more_options') {
+      // -- SHOW MORE OPTIONS (kontekstowo) --
+      const moreRx = /\b(pokaz\s*(wiecej|reszte)|wiecej|inne|pokaz\s*opcje)\b/i;
+      if (moreRx.test(lower)) {
         console.log('🧠 SmartContext Boost → intent=show_more_options (expected context)');
         return 'show_more_options';
       }
+      // nic nie mówimy → nie nadpisuj na cokolwiek innego (fall-through bez zmiany)
     }
 
     // Oczekiwany kontekst: "wybierz restaurację"
-    if (session.expectedContext === 'select_restaurant') {
-      if (/(wybieram|wybierz|ta\s+pierwsza|ta\s+druga|ta\s+trzecia|numer\s+1|numer\s+2|numer\s+3|\d+)/i.test(lower)) {
+    if (ctx.expectedContext === 'select_restaurant') {
+      // -- SELECT RESTAURANT (cyfra lub liczebnik porządkowy) --
+      const numberOnly = text.trim().match(/^\s*([1-9])\s*$/); // "1".."9" solo
+      const ordinalPl = /(pierwsz(ą|y)|drug(ą|i)|trzeci(ą|i)|czwart(ą|y)|piąt(ą|y)|szóst(ą|y)|siódm(ą|y)|ósm(ą|y)|dziewiąt(ą|y))/i;
+      if (numberOnly || ordinalPl.test(lower) || /(wybieram|wybierz|numer\s+[1-9])/i.test(lower)) {
         console.log('🧠 SmartContext Boost → intent=select_restaurant (expected context)');
         return 'select_restaurant';
       }
     }
 
     // Oczekiwany kontekst: "potwierdź zamówienie" (NAJWYŻSZY PRIORYTET!)
-    if (session.expectedContext === 'confirm_order') {
+    if (ctx.expectedContext === 'confirm_order') {
       console.log('🧠 SmartContext: expectedContext=confirm_order detected, checking user response...');
 
       // Potwierdzenie - bardziej elastyczne dopasowanie
@@ -599,15 +615,28 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
         return 'confirm_order';
       }
 
-      // Odrzucenie zamówienia - używaj znormalizowanego tekstu
-      if (/(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(lower) ||
-          /nie\s+(chce|chcę|teraz|zamawiaj)/i.test(lower)) {
-        console.log('🧠 SmartContext Boost → intent=cancel_order (expected context, user declined)');
+      // "nie", "inne" w kontekście wyboru/confirm → preferuj change_restaurant
+      const neg = /\b(nie|inne|zmien|zmień)\b/i;
+      if (neg.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=change_restaurant (negation within confirm/select context)');
+        return 'change_restaurant';
+      }
+
+      // Jeśli user mówi wyraźnie "anuluj" → cancel
+      if (/\b(anuluj|rezygnuj|odwołaj)\b/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=cancel_order (explicit cancel)');
         return 'cancel_order';
       }
 
       console.log('⚠️ SmartContext: expectedContext=confirm_order but user response unclear, falling through...');
     }
+  }
+
+  // Nie modyfikuj jeśli intencja jest bardzo pewna (NAJWYŻSZY PRIORYTET)
+  // WYJĄTEK: jeśli był expectedContext powyżej, to już zwróciliśmy wcześniej
+  if (confidence >= 0.8) {
+    console.log(`🧠 SmartContext: skipping boost (confidence=${confidence})`);
+    return intent;
   }
 
   // 🧠 FALLBACK: Jeśli nie ma expectedContext, ale lastIntent to create_order, 
@@ -994,11 +1023,13 @@ export default async function handler(req, res) {
       const geoRestaurants = await findRestaurantsByLocation(geoLocation, geoCuisineType, session);
 
       if (geoRestaurants?.length) {
-        // Zapisz lokalizację do sesji
+        // Zapisz lokalizację i listę do sesji (dla follow-up: show_more_options/select_restaurant)
         updateSession(sessionId, {
           last_location: geoLocation,
           lastIntent: 'find_nearby',
-          lastUpdated: Date.now()
+          lastUpdated: Date.now(),
+          expectedContext: geoRestaurants.length > 1 ? 'select_restaurant' : null,
+          last_restaurants_list: geoRestaurants
         });
         console.log(`✅ GeoContext: ${geoRestaurants.length} restaurants found in "${geoLocation}"${geoCuisineType ? ` (cuisine: ${geoCuisineType})` : ''} — early return`);
 
@@ -1293,6 +1324,83 @@ export default async function handler(req, res) {
           });
           console.log(`🧠 Set expectedContext=select_restaurant for follow-up (saved ${restaurants.length} restaurants)`);
         }
+        break;
+      }
+
+      case "show_more_options": {
+        console.log('🧠 show_more_options intent detected');
+        const s = getSession(sessionId) || {};
+        const all = s.last_restaurants_list || [];
+        if (!all || !all.length) {
+          replyCore = "Nie mam więcej opcji do pokazania. Spróbuj zapytać ponownie o restauracje w okolicy.";
+          break;
+        }
+
+        const list = all.map((r, i) => `${i+1}. ${r.name}${r.cuisine_type ? ` - ${r.cuisine_type}` : ''}`).join('\n');
+        replyCore = `Oto pełna lista opcji:\n${list}\n\nPowiedz numer, np. \"1\" albo \"ta pierwsza\".`;
+
+        // Ustaw oczekiwany kontekst na wybór restauracji
+        updateSession(sessionId, {
+          expectedContext: 'select_restaurant',
+          last_restaurants_list: all
+        });
+        break;
+      }
+
+      case "select_restaurant": {
+        console.log('🧠 select_restaurant intent detected');
+        const s = getSession(sessionId) || {};
+        const list = s.last_restaurants_list || [];
+
+        // 1) Spróbuj wyciągnąć numer z tekstu ("Wybieram numer 1" lub samo "2")
+        let idx = null;
+        const numOnly = String(text || '').trim().match(/^\s*([1-9])\s*$/);
+        const numInPhrase = String(text || '').match(/numer\s*([1-9])/i);
+        if (numOnly) idx = parseInt(numOnly[1], 10) - 1;
+        else if (numInPhrase) idx = parseInt(numInPhrase[1], 10) - 1;
+        else {
+          // 2) Liczebniki porządkowe
+          const lowerTxt = normalizeTxt(String(text || ''));
+          const ordinals = [
+            /pierwsz(a|y)/i,
+            /drug(a|i)/i,
+            /trzeci(a|i)/i,
+            /czwart(a|y)/i,
+            /piat(a|y)/i,
+            /szost(a|y)/i,
+            /siodm(a|y)/i,
+            /osm(a|y)/i,
+            /dziewiat(a|y)/i
+          ];
+          for (let i = 0; i < ordinals.length; i++) {
+            if (ordinals[i].test(lowerTxt)) { idx = i; break; }
+          }
+        }
+
+        let chosen = null;
+        if (idx != null && Array.isArray(list) && list[idx]) {
+          chosen = list[idx];
+        }
+
+        // 3) Fallback: jeśli brak numeru, spróbuj dopasować po nazwie
+        if (!chosen) {
+          const name = restaurant?.name || parsed.restaurant || '';
+          if (name) {
+            chosen = await findRestaurant(name);
+          }
+        }
+
+        if (!chosen) {
+          replyCore = "Jasne! Daj mi pełną nazwę restauracji albo numer z listy, to pomogę Ci dalej.";
+          break;
+        }
+
+        updateSession(sessionId, {
+          lastRestaurant: chosen,
+          expectedContext: null
+        });
+
+        replyCore = `Wybrano restaurację ${chosen.name}${chosen.city ? ` (${chosen.city})` : ''}. Pokaż menu, czy od razu coś zamawiamy?`;
         break;
       }
 
