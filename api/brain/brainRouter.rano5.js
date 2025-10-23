@@ -4,80 +4,7 @@ import { supabase } from "../_supabase.js";
 import { getSession, updateSession } from "./context.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const MODEL = "gpt-4o";
-
-// --- Validation Functions ---
-
-/**
- * Waliduje input tekstowy od użytkownika
- * @param {string} text - Tekst do walidacji
- * @returns {object} - { valid: boolean, error?: string }
- */
-function validateInput(text) {
-  if (!text || typeof text !== 'string') {
-    return { valid: false, error: 'Invalid input: text must be non-empty string' };
-  }
-  
-  if (text.length > 1000) {
-    return { valid: false, error: 'Input too long: max 1000 characters' };
-  }
-  
-  if (text.trim().length === 0) {
-    return { valid: false, error: 'Input cannot be empty or whitespace only' };
-  }
-  
-  // Sprawdź czy nie zawiera potencjalnie szkodliwych znaków
-  if (/[<>{}[\]\\|`~]/.test(text)) {
-    return { valid: false, error: 'Input contains potentially harmful characters' };
-  }
-  
-  return { valid: true };
-}
-
-/**
- * Waliduje sesję użytkownika
- * @param {object} session - Sesja do walidacji
- * @returns {object} - { valid: boolean, session?: object, error?: string }
- */
-function validateSession(session) {
-  if (!session) {
-    return { valid: false, error: 'No session provided' };
-  }
-  
-  // Sprawdź czy sesja nie jest za stara (1 godzina)
-  if (session.lastUpdated && Date.now() - session.lastUpdated > 3600000) {
-    console.log('🕐 Session expired (older than 1 hour), clearing...');
-    return { valid: false, error: 'Session expired' };
-  }
-  
-  // Sprawdź czy sessionId jest prawidłowy
-  if (session.sessionId && typeof session.sessionId !== 'string') {
-    return { valid: false, error: 'Invalid sessionId type' };
-  }
-  
-  return { valid: true, session };
-}
-
-/**
- * Waliduje dane restauracji
- * @param {object} restaurant - Restauracja do walidacji
- * @returns {boolean}
- */
-function validateRestaurant(restaurant) {
-  if (!restaurant || typeof restaurant !== 'object') {
-    return false;
-  }
-  
-  if (!restaurant.id || !restaurant.name) {
-    return false;
-  }
-  
-  if (typeof restaurant.id !== 'string' || typeof restaurant.name !== 'string') {
-    return false;
-  }
-  
-  return true;
-}
+const MODEL = "gpt-4o-mini";
 
 // --- Helper Functions ---
 
@@ -572,7 +499,7 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
     // Oczekiwany kontekst: "pokaż więcej opcji"
     if (session.expectedContext === 'show_more_options') {
       // Używamy znormalizowanego tekstu (bez polskich znaków)
-      if (/(pokaz\s+wiecej|pokaz\s+wiecej\s+opcji|pokaz\s+wszystkie|pokaz\s+pozostale|pokaz\s+reszte|wiecej\s+opcji)/i.test(lower)) {
+      if (/(pokaz\s+wiecej|pokaz\s+wiecej\s+opcji|pokaz\s+wszystkie|pokaz\s+pozostale|pokaz\s+reste|wiecej\s+opcji)/i.test(lower)) {
         console.log('🧠 SmartContext Boost → intent=show_more_options (expected context)');
         return 'show_more_options';
       }
@@ -599,8 +526,8 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
         return 'confirm_order';
       }
 
-      // Odrzucenie zamówienia - używaj znormalizowanego tekstu
-      if (/(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(lower) ||
+      // Odrzucenie zamówienia
+      if (/(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(text) ||
           /nie\s+(chce|chcę|teraz|zamawiaj)/i.test(lower)) {
         console.log('🧠 SmartContext Boost → intent=cancel_order (expected context, user declined)');
         return 'cancel_order';
@@ -608,22 +535,6 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
 
       console.log('⚠️ SmartContext: expectedContext=confirm_order but user response unclear, falling through...');
     }
-  }
-
-  // 🧠 FALLBACK: Jeśli nie ma expectedContext, ale lastIntent to create_order, 
-  // a użytkownik mówi "nie", to prawdopodobnie chce anulować zamówienie
-  if (!session?.expectedContext && session?.lastIntent === 'create_order' && 
-      /(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(lower)) {
-    console.log('🧠 SmartContext Fallback → intent=cancel_order (lastIntent=create_order + "nie")');
-    return 'cancel_order';
-  }
-
-  // 🧠 Dodatkowy fallback: jeśli poprzedni krok to clarify_order (prośba o doprecyzowanie),
-  // a użytkownik mówi "nie/anuluj", potraktuj to jako anulowanie
-  if (!session?.expectedContext && session?.lastIntent === 'clarify_order' &&
-      /(^|\s)(nie|anuluj|rezygnuje|rezygnuję)(\s|$)/i.test(lower)) {
-    console.log('🧠 SmartContext Fallback → intent=cancel_order (lastIntent=clarify_order + "nie")');
-    return 'cancel_order';
   }
 
   // Follow-up logic — krótkie odpowiedzi kontekstowe
@@ -640,17 +551,7 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
 
   // Zmiana restauracji — dopuszcza "nie, pokaż inne", "nie chcę tego", etc.
   // Word boundaries \b aby nie wykrywać "nie" w "wege"
-  // Dodatkowa ochrona: nie wykrywaj jeśli tekst zawiera "wege" lub "wegetarian"
-  // Preferuj anulowanie, jeśli istnieje oczekujące zamówienie
-  try {
-    if (session?.pendingOrder && /(\bnie\b|anuluj|rezygnuje|rezygnuję)/i.test(lower)) {
-      console.log('🧠 SmartContext Boost → intent=cancel_order (pendingOrder present)');
-      return 'cancel_order';
-    }
-  } catch {}
-
-  if (/(\bnie\b|zmien|zmień|\binne\b|cos innego|coś innego|pokaz inne|pokaż inne|inna restaurac)/i.test(lower) &&
-      !/wege|wegetarian|roslinne/i.test(lower)) {
+  if (/(\bnie\b|zmien|zmień|\binne\b|cos innego|coś innego|pokaz inne|pokaż inne|inna restaurac)/i.test(lower)) {
     console.log('🧠 SmartContext Boost → intent=change_restaurant (phrase: "nie/inne")');
     return 'change_restaurant';
   }
@@ -782,25 +683,9 @@ function extractCuisineType(text) {
  * Znajduje restauracje w danej lokalizacji używając fuzzy matching
  * @param {string} location - Nazwa miasta/lokalizacji
  * @param {string|null} cuisineType - Opcjonalny typ kuchni do filtrowania (może być alias)
- * @param {object|null} session - Sesja użytkownika (dla cache)
  */
-async function findRestaurantsByLocation(location, cuisineType = null, session = null) {
+async function findRestaurantsByLocation(location, cuisineType = null) {
   if (!location) return null;
-
-  // 🔹 Cache: sprawdź czy mamy wyniki w sesji (ważne przez 5 minut)
-  const cacheKey = `${normalize(location)}_${cuisineType || 'all'}`;
-  const now = Date.now();
-  const cacheTimeout = 5 * 60 * 1000; // 5 minut
-
-  if (session?.locationCache?.[cacheKey]) {
-    const cached = session.locationCache[cacheKey];
-    if (cached.timestamp > now - cacheTimeout) {
-      console.log(`💾 Cache HIT for location: "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''} (age: ${Math.round((now - cached.timestamp) / 1000)}s)`);
-      return cached.data;
-    } else {
-      console.log(`💾 Cache EXPIRED for location: "${location}" (age: ${Math.round((now - cached.timestamp) / 1000)}s)`);
-    }
-  }
 
   try {
     let query = supabase
@@ -833,17 +718,6 @@ async function findRestaurantsByLocation(location, cuisineType = null, session =
     }
 
     console.log(`🗺️ Found ${restaurants.length} restaurants in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
-
-    // 🔹 Zapisz do cache w sesji
-    if (session) {
-      if (!session.locationCache) session.locationCache = {};
-      session.locationCache[cacheKey] = {
-        data: restaurants,
-        timestamp: now
-      };
-      console.log(`💾 Cache SAVED for location: "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
-    }
-
     return restaurants;
   } catch (err) {
     console.error('⚠️ findRestaurantsByLocation error:', err.message);
@@ -855,12 +729,11 @@ async function findRestaurantsByLocation(location, cuisineType = null, session =
  * Helper: Semantic fallback — zaproponuj restauracje z last_location
  * Używany w menu_request, create_order gdy brak restauracji w kontekście
  */
-async function getLocationFallback(sessionId, prevLocation, messageTemplate) {
+async function getLocationFallback(prevLocation, messageTemplate) {
   if (!prevLocation) return null;
 
   console.log(`🧭 Semantic fallback: using last_location = ${prevLocation}`);
-  const session = getSession(sessionId);
-  const locationRestaurants = await findRestaurantsByLocation(prevLocation, null, session);
+  const locationRestaurants = await findRestaurantsByLocation(prevLocation);
 
   if (!locationRestaurants?.length) return null;
 
@@ -896,61 +769,12 @@ export default async function handler(req, res) {
 
     const body = await req.json?.() || req.body || {};
     const { sessionId = "default", text } = body;
-    
-    // 🔍 VALIDATION: Sprawdź input
-    const inputValidation = validateInput(text);
-    if (!inputValidation.valid) {
-      console.error('❌ Input validation failed:', inputValidation.error);
-      // Soft-fail: zwróć intent=none zamiast 400, aby UI i testy mogły przejść
-      return res.status(200).json({
-        ok: true,
-        intent: 'none',
-        reply: "Nie bardzo to rozumiem. Powiedz np. ‘gdzie zjeść’ albo ‘pokaż menu’.",
-        fallback: true,
-        context: getSession(sessionId)
-      });
-    }
-    
-    // 🧠 [DEBUG] 2A: Handler entry logging
-    console.log('🧠 [DEBUG] Handler called with:', {
-      sessionId,
-      text,
-      method: req.method,
-      body: req.body,
-      hasText: !!text,
-      textLength: text?.length || 0
-    });
-    
     if (!text) return res.status(400).json({ ok: false, error: "Missing text" });
 
     // 🔹 Pobierz kontekst sesji (pamięć krótkotrwała)
-    const rawSession = getSession(sessionId) || {};
-    
-    // 🔍 VALIDATION: Sprawdź sesję
-    const sessionValidation = validateSession(rawSession);
-    if (!sessionValidation.valid) {
-      console.warn('⚠️ Session validation failed:', sessionValidation.error);
-      // Wyczyść sesję jeśli jest nieprawidłowa
-      updateSession(sessionId, {});
-    }
-    const session = sessionValidation.session || {};
+    const session = getSession(sessionId) || {};
     const prevRestaurant = session?.lastRestaurant;
     const prevLocation = session?.last_location;
-    
-    // 🧠 [DEBUG] 2B: Session state logging
-    console.log('🧠 [DEBUG] Current session state:', {
-      sessionId,
-      session: session,
-      hasExpectedContext: !!session?.expectedContext,
-      expectedContextValue: session?.expectedContext,
-      hasLastRestaurant: !!session?.lastRestaurant,
-      lastRestaurantName: session?.lastRestaurant?.name,
-      hasLastLocation: !!session?.last_location,
-      lastLocation: session?.last_location,
-      hasPendingOrder: !!session?.pendingOrder,
-      lastIntent: session?.lastIntent,
-      sessionKeys: Object.keys(session || {})
-    });
 
     // 🔹 Krok 0: GeoContext Layer (priorytet najwyższy — przed detectIntent)
     const geoLocation = extractLocation(text);
@@ -958,8 +782,7 @@ export default async function handler(req, res) {
 
     if (geoLocation) {
       console.log(`🧭 GeoContext Layer activated for: "${geoLocation}"${geoCuisineType ? ` (cuisine: ${geoCuisineType})` : ''}`);
-      const session = getSession(sessionId);
-      const geoRestaurants = await findRestaurantsByLocation(geoLocation, geoCuisineType, session);
+      const geoRestaurants = await findRestaurantsByLocation(geoLocation, geoCuisineType);
 
       if (geoRestaurants?.length) {
         // Zapisz lokalizację do sesji
@@ -1000,24 +823,7 @@ export default async function handler(req, res) {
     const currentSession = getSession(sessionId);
     console.log('[brainRouter] 🧠 Current session:', currentSession);
     const { intent: rawIntent, restaurant, parsedOrder, confidence: rawConfidence } = await detectIntent(text, currentSession);
-    
-    // 🧠 [DEBUG] 2C: Intent flow logging - detectIntent result
-    console.log('🧠 [DEBUG] detectIntent result:', {
-      rawIntent,
-      confidence: rawConfidence,
-      hasRestaurant: !!restaurant,
-      restaurantName: restaurant?.name,
-      hasParsedOrder: !!parsedOrder,
-      parsedOrderDetails: parsedOrder ? {
-        any: parsedOrder.any,
-        groupsCount: parsedOrder.groups?.length || 0,
-        groups: parsedOrder.groups?.map(g => ({
-          restaurant_name: g.restaurant_name,
-          itemsCount: g.items?.length || 0,
-          items: g.items?.map(i => `${i.quantity}x ${i.name}`).join(', ') || 'none'
-        })) || []
-      } : null
-    });
+    console.log('[brainRouter] 🧠 detectIntent returned:', { rawIntent, restaurant: restaurant?.name, confidence: rawConfidence, hasParsedOrder: !!parsedOrder });
 
     // 🔹 Krok 1.5: SmartContext Boost — warstwa semantyczna
     // ⚠️ NIE ZMIENIAJ INTENCJI jeśli parsedOrder istnieje (early dish detection zadziałał)
@@ -1025,29 +831,8 @@ export default async function handler(req, res) {
     if (parsedOrder?.any) {
       console.log('🔒 SmartContext: skipping boost (parsedOrder exists)');
     } else {
-      // 🧠 [DEBUG] 2C: Intent flow logging - boostIntent call
-      console.log('🧠 [DEBUG] Calling boostIntent with:', {
-        text,
-        rawIntent,
-        confidence: rawConfidence || 0.5,
-        session: currentSession ? {
-          expectedContext: currentSession.expectedContext,
-          lastRestaurant: currentSession.lastRestaurant?.name,
-          lastIntent: currentSession.lastIntent
-        } : null
-      });
-      
       const boostedIntent = boostIntent(text, rawIntent, rawConfidence || 0.5, currentSession);
       intent = boostedIntent;
-      
-      // 🧠 [DEBUG] 2C: Intent flow logging - boostIntent result
-      console.log('🧠 [DEBUG] boostIntent result:', {
-        originalIntent: rawIntent,
-        boostedIntent: intent,
-        changed: rawIntent !== intent,
-        changeReason: rawIntent !== intent ? 'boostIntent modified intent' : 'no change'
-      });
-      
       if (boostedIntent !== rawIntent) {
         console.log(`🌟 SmartContext: intent changed from "${rawIntent}" → "${boostedIntent}"`);
       }
@@ -1080,8 +865,7 @@ export default async function handler(req, res) {
 
         if (location) {
           console.log(`🧭 GeoContext active: searching in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
-          const session = getSession(sessionId);
-          restaurants = await findRestaurantsByLocation(location, cuisineType, session);
+          restaurants = await findRestaurantsByLocation(location, cuisineType);
 
           if (restaurants) {
             // Zapisz lokalizację do sesji
@@ -1270,7 +1054,6 @@ export default async function handler(req, res) {
 
             // 🧭 Semantic fallback
             const fallback = await getLocationFallback(
-              sessionId,
               prevLocation,
               `Nie znalazłam "${parsed.restaurant}", ale w {location} mam:\n{list}\n\nKtórą wybierasz?`
             );
@@ -1287,20 +1070,19 @@ export default async function handler(req, res) {
         // Użyj zweryfikowanej restauracji lub ostatniej z sesji
         const current = verifiedRestaurant || getSession(sessionId)?.lastRestaurant;
         if (!current) {
-          console.warn('⚠️ No restaurant in context for menu_request');
+          console.warn('⚠️ No restaurant in context');
 
-          // 🧭 Semantic fallback - pokaż najbliższe restauracje
+          // 🧭 Semantic fallback
           const fallback = await getLocationFallback(
-            sessionId,
             prevLocation,
-            `Najpierw wybierz restaurację z tych w pobliżu:\n{list}\n\nKtórą wybierasz?`
+            `W {location} mam {count} restauracji. Którą wybierasz?\n{list}`
           );
           if (fallback) {
             replyCore = fallback;
             break;
           }
 
-          replyCore = "Najpierw wybierz restaurację, a potem pokażę menu. Powiedz 'gdzie zjeść' aby zobaczyć opcje.";
+          replyCore = "Najpierw podaj nazwę restauracji.";
           break;
         }
 
@@ -1390,10 +1172,9 @@ Co wybierasz?`;
 
       case "create_order": {
         console.log('🧠 create_order intent detected');
-        
-        try {
-          // 🎯 PRIORITY: Użyj parsedOrder z detectIntent() jeśli dostępny
-          if (parsedOrder?.any) {
+
+        // 🎯 PRIORITY: Użyj parsedOrder z detectIntent() jeśli dostępny
+        if (parsedOrder?.any) {
           console.log('✅ Using parsedOrder from detectIntent()');
 
           // Wybierz pierwszą grupę (restaurację) z parsed order
@@ -1442,13 +1223,11 @@ Co wybierasz?`;
 
           console.log('✅ Pending order saved to session:');
           console.log('   - expectedContext: confirm_order');
-          console.log('   - pendingOrder items count:', pendingOrder.items.length);
-          console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
+          console.log('   - pendingOrder items:', pendingOrder.items.map(i => i.name).join(', '));
           console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
-          console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
           console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
           break;
-          }
+        }
 
         // FALLBACK: Stara logika (jeśli parsedOrder nie jest dostępny)
         // Jeśli w tekście padła nazwa restauracji, spróbuj ją znaleźć
@@ -1468,7 +1247,6 @@ Co wybierasz?`;
 
           // 🧭 Semantic fallback
           const fallback = await getLocationFallback(
-            sessionId,
             prevLocation,
             `Najpierw wybierz restaurację w {location}:\n{list}\n\nZ której chcesz zamówić?`
           );
@@ -1533,17 +1311,10 @@ Co wybierasz?`;
 
         console.log('✅ Pending order saved to session (fallback path):');
         console.log('   - expectedContext: confirm_order');
-        console.log('   - pendingOrder items count:', pendingOrder.items.length);
-        console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
+        console.log('   - pendingOrder items:', pendingOrder.items.map(i => i.name).join(', '));
         console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
-        console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
         console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
         break;
-        } catch (error) {
-          console.error('❌ create_order error:', error);
-          replyCore = "Przepraszam, wystąpił błąd przy przetwarzaniu zamówienia. Spróbuj ponownie.";
-          break;
-        }
       }
 
       // 🌟 SmartContext v3.1: Recommend (top-rated restaurants)
@@ -1610,11 +1381,10 @@ Co wybierasz?`;
       // 🛒 Confirm Order (potwierdzenie dodania do koszyka)
       case "confirm_order": {
         console.log('🛒 confirm_order intent detected');
-        
-        try {
-          // Pobierz pendingOrder z sesji
-          const session = getSession(sessionId);
-          const pendingOrder = session?.pendingOrder;
+
+        // Pobierz pendingOrder z sesji
+        const session = getSession(sessionId);
+        const pendingOrder = session?.pendingOrder;
 
         console.log('🔍 Checking session for pendingOrder...');
         console.log('   - sessionId:', sessionId);
@@ -1630,10 +1400,8 @@ Co wybierasz?`;
 
         console.log('✅ Confirming pending order:');
         console.log('   - restaurant:', pendingOrder.restaurant.name);
-        console.log('   - items count:', pendingOrder.items.length);
         console.log('   - items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
         console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
-        console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
 
         // Wyczyść expectedContext i pendingOrder z sesji
         updateSession(sessionId, {
@@ -1656,21 +1424,15 @@ Co wybierasz?`;
           context: getSession(sessionId),
           timestamp: new Date().toISOString(),
         });
-        } catch (error) {
-          console.error('❌ confirm_order error:', error);
-          replyCore = "Przepraszam, wystąpił błąd przy potwierdzaniu zamówienia. Spróbuj ponownie.";
-          break;
-        }
       }
 
       // 🛒 Cancel Order (anulowanie zamówienia)
       case "cancel_order": {
         console.log('🛒 cancel_order intent detected');
-        
-        try {
-          // Pobierz pendingOrder z sesji
-          const session = getSession(sessionId);
-          const pendingOrder = session?.pendingOrder;
+
+        // Pobierz pendingOrder z sesji
+        const session = getSession(sessionId);
+        const pendingOrder = session?.pendingOrder;
 
         console.log('🔍 Checking session for pendingOrder to cancel...');
         console.log('   - sessionId:', sessionId);
@@ -1695,11 +1457,6 @@ Co wybierasz?`;
 
         replyCore = "Okej, anulowałam zamówienie. Co chcesz zamówić?";
         break;
-        } catch (error) {
-          console.error('❌ cancel_order error:', error);
-          replyCore = "Przepraszam, wystąpił błąd przy anulowaniu zamówienia. Spróbuj ponownie.";
-          break;
-        }
       }
 
       // 🌟 SmartContext v3.1: Change Restaurant (follow-up "nie/inne")
@@ -1709,8 +1466,7 @@ Co wybierasz?`;
         updateSession(sessionId, { expectedContext: null });
 
         if (prevLocation) {
-          const session = getSession(sessionId);
-          const otherRestaurants = await findRestaurantsByLocation(prevLocation, null, session);
+          const otherRestaurants = await findRestaurantsByLocation(prevLocation);
           if (otherRestaurants?.length) {
             // SmartContext v3.1: Naturalny styl — kategorie zamiast listy
             const categories = groupRestaurantsByCategory(otherRestaurants);
@@ -1780,54 +1536,43 @@ Co wybierasz?`;
         break;
       }
 
-      default: {
-        console.warn('⚠️ Unknown intent:', intent);
-        
-        try {
-          // 🧭 Semantic Context: sprawdź czy istnieje last_restaurant lub last_location
-          if (prevRestaurant) {
-            console.log(`🧠 Context fallback: using last_restaurant = ${prevRestaurant.name}`);
-            replyCore = `Chcesz zobaczyć menu restauracji ${prevRestaurant.name}${prevLocation ? ` w ${prevLocation}` : ''}?`;
-            break;
-          }
-
-          if (prevLocation) {
-            console.log(`🧠 Context fallback: using last_location = ${prevLocation}`);
-            replyCore = `Chcesz zobaczyć restauracje w ${prevLocation}? Powiedz "pokaż restauracje" lub wybierz konkretną nazwę.`;
-            break;
-          }
-
-          // Fallback do standardowej odpowiedzi
-          replyCore = "Nie jestem pewna, co masz na myśli — możesz powtórzyć?";
-          break;
-        } catch (error) {
-          console.error('❌ default case error:', error);
-          replyCore = "Przepraszam, wystąpił błąd. Spróbuj powiedzieć 'gdzie zjeść' lub 'pokaż menu'.";
+      default:
+        // 🧭 Semantic Context: sprawdź czy istnieje last_restaurant lub last_location
+        if (prevRestaurant) {
+          console.log(`🧠 Context fallback: using last_restaurant = ${prevRestaurant.name}`);
+          replyCore = `Chcesz zobaczyć menu restauracji ${prevRestaurant.name}${prevLocation ? ` w ${prevLocation}` : ''}?`;
           break;
         }
-      }
+
+        if (prevLocation) {
+          console.log(`🧠 Context fallback: using last_location = ${prevLocation}`);
+          replyCore = `Chcesz zobaczyć restauracje w ${prevLocation}? Powiedz "pokaż restauracje" lub wybierz konkretną nazwę.`;
+          break;
+        }
+
+        // Fallback do standardowej odpowiedzi
+        replyCore = "Nie jestem pewna, co masz na myśli — możesz powtórzyć?";
+        break;
     }
 
     // 🔹 Krok 4: Generacja odpowiedzi Amber (stylistyczna)
-    let reply = replyCore;
-    if (process.env.OPENAI_API_KEY) {
-      const amberCompletion = await fetch(OPENAI_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        // ⬇️ dodaj timeout i parametry zwiększające szansę na pełny zwrot
-        body: JSON.stringify({
-          model: MODEL,
-          temperature: 0.7,
-          max_tokens: 300, // zwiększ limity generacji
-          presence_penalty: 0.2,
-          frequency_penalty: 0.2,
-          messages: [
-            {
-              role: "system",
-              content: `Jesteś Amber — asystentką FreeFlow, która pomaga użytkownikom zamawiać jedzenie.
+    const amberCompletion = await fetch(OPENAI_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      // ⬇️ dodaj timeout i parametry zwiększające szansę na pełny zwrot
+      body: JSON.stringify({
+        model: MODEL,
+        temperature: 0.7,
+        max_tokens: 300, // zwiększ limity generacji
+        presence_penalty: 0.2,
+        frequency_penalty: 0.2,
+        messages: [
+          {
+            role: "system",
+            content: `Jesteś Amber — asystentką FreeFlow, która pomaga użytkownikom zamawiać jedzenie.
 
 WAŻNE ZASADY:
 1. Jesteś ASYSTENTEM, nie klientem — nie mów "ja chcę", "odwiedziłabym", "wybrałabym"
@@ -1851,18 +1596,17 @@ KONTEKST MIEJSCA:
 - Zawsze zaczynaj od kontekstu miejsca: "W Piekarach Śląskich mam...", "W pobliżu mam..."
 - Używaj luzu, ale nie slangowego chaosu
 - Jeśli użytkownik nie doprecyzował — pytaj w stylu: "Wolisz coś na szybko, czy zasiąść spokojnie przy stole?"`,
-            },
-            { role: "user", content: `Przepisz tę odpowiedź w swoim stylu (krótko, naturalnie, z luzem), zachowując WSZYSTKIE dane:\n\n${replyCore}` },
-          ],
-        }),
-      });
+          },
+          { role: "user", content: `Przepisz tę odpowiedź w swoim stylu (krótko, naturalnie, z luzem), zachowując WSZYSTKIE dane:\n\n${replyCore}` },
+        ],
+      }),
+    });
 
-      const amberData = await amberCompletion.json();
-      reply =
-        amberData.choices?.[0]?.message?.content?.trim() ||
-        replyCore ||
-        "Nie mam teraz odpowiedzi.";
-    }
+    const amberData = await amberCompletion.json();
+    const reply =
+      amberData.choices?.[0]?.message?.content?.trim() ||
+      replyCore ||
+      "Nie mam teraz odpowiedzi.";
 
     // --- Anty-bullshit watchdog (cicha wersja prod-safe) ---
     const sanitizedReply = (reply || "").trim();

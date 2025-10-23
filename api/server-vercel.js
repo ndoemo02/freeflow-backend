@@ -13,6 +13,7 @@ app.use(morgan('tiny'));
 
 // --- Env sanity ---
 console.log('🚀 Booting FreeFlow Serverless...');
+console.log('🧠 ENV OK');
 console.log('🔑 SUPABASE_URL:', process.env.SUPABASE_URL ? '✅' : '❌');
 console.log('🔑 OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? '✅' : '❌');
 

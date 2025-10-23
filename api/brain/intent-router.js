@@ -94,6 +94,9 @@ const NAME_ALIASES = {
   'hawajska': 'pizza hawajska',
   'hawajskiej': 'pizza hawajska',
   'diavola': 'pizza diavola',
+  'diabolo': 'pizza diavola',       // częsty błąd STT/pronunciation
+  'diabola': 'pizza diavola',       // częsty błąd STT/pronunciation
+  'pizza diabolo': 'pizza diavola', // pełna nazwa z błędem
   'capricciosa': 'pizza capricciosa',
 
   // Mięsa
@@ -140,13 +143,40 @@ const NAME_ALIASES = {
 
 export function applyAliases(text) {
   if (!text) return '';
-  let t = normalizeTxt(text);
-  for (const [k,v] of Object.entries(NAME_ALIASES)) {
-    if (t.includes(k) && !t.includes(v)) {
-      t += ' ' + v;
+  const original = String(text);
+  let normalized = normalizeTxt(original);
+  let output = original; // domyślnie zwracaj oryginał, jeśli brak zamian
+  let anyReplacement = false;
+
+  console.log(`🔍 [applyAliases] Original text: "${original}"`);
+  console.log(`🔍 [applyAliases] Normalized: "${normalized}"`);
+
+  for (const [alias, fullName] of Object.entries(NAME_ALIASES)) {
+    const aliasNorm = normalizeTxt(alias);
+    const fullNorm = normalizeTxt(fullName);
+
+    if (normalized.includes(aliasNorm) && !normalized.includes(fullNorm)) {
+      // 1) Spróbuj podmienić w oryginalnym tekście (z diakrytykami), jeśli tam alias występuje
+      const origRegex = new RegExp(alias, 'gi');
+      if (origRegex.test(output)) {
+        output = output.replace(origRegex, fullName);
+        anyReplacement = true;
+        console.log(`🔍 [applyAliases] Replaced (original) "${alias}" → "${fullName}"`);
+      } else {
+        // 2) Fallback: zamień w wersji znormalizowanej, a następnie przypisz do output
+        normalized = normalized.replace(new RegExp(aliasNorm, 'gi'), fullNorm);
+        output = normalized; // w tym trybie wynik będzie znormalizowany
+        anyReplacement = true;
+        console.log(`🔍 [applyAliases] Replaced (normalized) "${aliasNorm}" → "${fullNorm}"`);
+      }
+
+      // Aktualizuj normalized, żeby kolejne aliasy widziały już zmiany
+      normalized = normalizeTxt(output);
     }
   }
-  return t;
+
+  console.log(`🔍 [applyAliases] Final result: "${output}"`);
+  return anyReplacement ? output : original;
 }
 
 function fuzzyMatch(a, b) {
@@ -316,11 +346,42 @@ export function parseOrderItems(text, catalog) {
 
   const { selected, clarifications } = dedupHitsByBase(allHits, preferredSize);
 
-  // Sprawdź czy są niedostępne pozycje (fallback)
+  // Sprawdź czy są niedostępne pozycje (fallback) – nie psuj głównego dopasowania
   const matched = (selected || []).filter(h => h && h.matchScore > 0.75);
   const requestedNames = (requestedItems || []).map(i => i && i.name ? i.name.toLowerCase() : '').filter(Boolean);
   const availableNames = matched.map(m => m && m.name ? m.name.toLowerCase() : '').filter(Boolean);
-  const unavailableNames = requestedNames.filter(n => !availableNames.includes(n));
+
+  // Helper do bezpiecznego fuzzy porównania nazwy dania
+  const fuzzyNameHit = (needle, haystackName) => {
+    if (!needle || !haystackName) return false;
+    const n = normalizeTxt(needle);
+    const h = normalizeTxt(haystackName);
+    if (!n || !h) return false;
+    if (h.includes(n) || n.includes(h)) return true;
+    // lżejszy próg: przynajmniej 1 wspólny token >2 znaków
+    const toks = n.split(' ').filter(Boolean).filter(t => t.length > 2);
+    return toks.some(t => h.includes(t));
+  };
+
+  // Pozycję uznajemy za „dostępną”, jeśli:
+  // - jest w matched (availableNames) ORAZ fuzzy pasuje, LUB
+  // - nie jest w matched (np. wymaga doprecyzowania rozmiaru), ale występuje w całym katalogu (też fuzzy)
+  const unavailableNames = requestedNames.filter(requestedName => {
+    // 1) Sprawdź na liście już dopasowanych
+    const inMatched = availableNames.some(an => fuzzyNameHit(requestedName, an));
+    if (inMatched) return false;
+
+    // 2) Sprawdź w całym katalogu (by nie oznaczać jako unavailable, gdy są warianty wymagające clarify)
+    const existsInCatalog = catalog.some(it => fuzzyNameHit(requestedName, it?.name));
+    return !existsInCatalog;
+  });
+
+  console.log(`[parseOrderItems] 📊 Summary:`);
+  console.log(`  - requestedNames: [${requestedNames.join(', ')}]`);
+  console.log(`  - availableNames: [${availableNames.join(', ')}]`);
+  console.log(`  - unavailableNames: [${unavailableNames.join(', ')}]`);
+  console.log(`  - matched.length: ${matched.length}`);
+  console.log(`  - clarifications.length: ${clarifications?.length || 0}`);
 
   const byR = {};
   for (const h of matched) {
@@ -576,18 +637,20 @@ export async function detectIntent(text, session = null) {
     // 🔹 KROK 3: Przygotuj słowa kluczowe (przed sprawdzeniem targetRestaurant)
     // Bazowe słowa kluczowe (BEZ polskich znaków - znormalizowane przez normalizeTxt)
     const findNearbyKeywords = [
-      'zjesc', 'restaurac', 'pizza', 'kebab', 'burger', 'zjesc cos', 'gdzie',
+      'zjesc', 'restaurac', 'pizza', 'pizze', 'kebab', 'burger', 'zjesc cos', 'gdzie',
       'w okolicy', 'blisko', 'cos do jedzenia', 'posilek', 'obiad',
       'gdzie zjem', 'co polecasz', 'restauracje w poblizu',
-      'mam ochote', 'ochote na', 'chce cos', 'szukam', 'szukam czegos',
+      'mam ochote', 'ochote na', 'chce cos', 'chce pizze', 'chce kebab', 'chce burger',
+      'szukam', 'szukam czegos', 'szukam pizzy', 'szukam kebaba',
       'cos azjatyckiego', 'cos lokalnego', 'cos szybkiego',
       'dostepne', 'co jest dostepne', 'co dostepne', 'co mam w poblizu',
       'co w okolicy', 'co jest w okolicy'
     ];
 
     const menuKeywords = [
-      'menu', 'co moge zjesc', 'co maja', 'pokaz menu', 'co jest w menu',
-      'dania', 'potrawy', 'co serwuja', 'co podaja', 'karta dan'
+      'menu', 'co moge zjesc', 'co maja', 'pokaz menu', 'pokaż menu', 'co jest w menu',
+      'dania', 'potrawy', 'co serwuja', 'co podaja', 'karta dan', 'karta dań',
+      'co jest dostepne', 'co dostepne', 'co maja w menu'
     ];
 
     const orderKeywords = [

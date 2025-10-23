@@ -5,7 +5,8 @@ import { parseOrderItems } from "../api/brain/intent-router.js";
 const mockCatalog = [
   { id: "1", name: "Zupa czosnkowa", price: 14.9, restaurant_id: "r1", restaurant_name: "Test Restaurant" },
   { id: "2", name: "Frytki", price: 8.5, restaurant_id: "r1", restaurant_name: "Test Restaurant" },
-  { id: "3", name: "Pizza Margherita", price: 25.0, restaurant_id: "r2", restaurant_name: "Pizzeria" }
+  { id: "3", name: "Pizza Margherita", price: 25.0, restaurant_id: "r2", restaurant_name: "Pizzeria" },
+  { id: "4", name: "Placki ziemniaczane z gulaszem", price: 18.0, restaurant_id: "r1", restaurant_name: "Test Restaurant" }
 ];
 
 console.log("🧪 Testing parseOrderItems...");
@@ -57,9 +58,41 @@ try {
   }
   
   console.log("✅ Test 4 OK - missingAll:", result4.missingAll);
-  
+
+  // Test 5: Fuzzy matching - "placki ziemniaczane" powinno znaleźć "Placki ziemniaczane z gulaszem"
+  console.log("\n📋 Test 5: Fuzzy matching (substring)");
+  const result5 = parseOrderItems("chciałbym zamówić placki ziemniaczane", mockCatalog);
+
+  console.log("Result 5:", JSON.stringify(result5, null, 2));
+  console.log("✅ Test 5 - Found groups:", result5.groups.length);
+  console.log("✅ Test 5 - Available items:", result5.available?.length || 0);
+  console.log("⚠️ Test 5 - Unavailable:", result5.unavailable?.length || 0);
+  console.log("⚠️ Test 5 - needsClarification:", result5.needsClarification);
+
+  if (result5.unavailable?.length > 0) {
+    console.log("   Unavailable items:", result5.unavailable.join(", "));
+  }
+
+  // Sprawdź czy "placki ziemniaczane" NIE jest w unavailable (powinno być znalezione przez fuzzy match)
+  if (result5.unavailable?.some(item => item.toLowerCase().includes('placki'))) {
+    console.error("❌ Test 5 FAILED - 'placki ziemniaczane' should NOT be in unavailable!");
+    console.error("   Expected: fuzzy match should find 'Placki ziemniaczane z gulaszem'");
+    console.error("   Actual unavailable:", result5.unavailable);
+    process.exit(1);
+  }
+
+  // Sprawdź czy znaleziono danie
+  if (result5.groups.length === 0 || result5.available?.length === 0) {
+    console.error("❌ Test 5 FAILED - Should find 'Placki ziemniaczane z gulaszem'!");
+    console.error("   groups:", result5.groups);
+    console.error("   available:", result5.available);
+    process.exit(1);
+  }
+
+  console.log("✅ Test 5 OK - Fuzzy matching works correctly!");
+
   console.log("\n✅ Parser sanity OK - All tests passed!");
-  
+
 } catch (error) {
   console.error("❌ Parser test failed:", error.message);
   console.error(error.stack);
