@@ -125,4 +125,11 @@ app.get("/api/menu", async (req, res) => {
 // --- Export handler for Vercel ---
 export default app;
 
+// --- KEEP ALIVE FOR LOCAL DEV ---
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`🧠 FreeFlow Brain running locally on http://localhost:${PORT}`);
+  });
+}
 

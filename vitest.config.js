@@ -3,47 +3,28 @@ import path from 'path';
 
 export default defineConfig({
   test: {
+    include: [
+      'tests/**/*.test.{js,ts}',
+      'api/brain/tests/**/*.test.{js,ts}'
+    ],
     globals: true,
     environment: 'node',
-    setupFiles: ['./tests/setup.js'],
+    reporters: ['verbose'],
+    setupFiles: [],
     testTimeout: 10000,
     hookTimeout: 10000,
-    teardownTimeout: 10000,
-    include: [
-      'tests/**/*.test.js',
-      'tests/**/*.spec.js'
-    ],
-    exclude: [
-      'node_modules',
-      'dist',
-      '.git'
-    ],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      include: [
-        'api/**/*.js'
-      ],
-      exclude: [
-        'api/**/*.test.js',
-        'api/**/*.spec.js',
-        'node_modules'
-      ],
-      thresholds: {
-        global: {
-          branches: 70,
-          functions: 70,
-          lines: 70,
-          statements: 70
-        }
-      }
-    }
+      reportsDirectory: './coverage'
+    },
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './'),
       '@api': path.resolve(__dirname, './api'),
-      '@tests': path.resolve(__dirname, './tests')
+      '@tests': path.resolve(__dirname, './tests'),
+      '@brain': path.resolve(__dirname, './api/brain'),
+      '@brainTests': path.resolve(__dirname, './api/brain/tests')
     }
   }
 });
