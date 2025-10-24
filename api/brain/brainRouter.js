@@ -1132,6 +1132,10 @@ export default async function handler(req, res) {
       const boostedIntent = boostIntent(text, rawIntent, rawConfidence || 0.5, currentSession);
       intent = boostedIntent;
       
+      // --- Alias normalization patch ---
+      if (intent === "confirm") intent = "confirm_order";
+      console.log(`🔄 Intent alias normalization: ${boostedIntent} → ${intent}`);
+      
       // 🧠 [DEBUG] 2C: Intent flow logging - boostIntent result
       console.log('🧠 [DEBUG] boostIntent result:', {
         originalIntent: rawIntent,
