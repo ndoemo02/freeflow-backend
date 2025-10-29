@@ -17,7 +17,7 @@ tests/
 
 ### Instalacja zależności
 ```bash
-cd freeflow-backend/api/brain/tests
+cd "reeflow-backend/api/brain/tests
 npm install
 ```
 
@@ -177,3 +177,5 @@ W przypadku problemów z testami:
 2. Sprawdź pokrycie: `npm run test:coverage`
 3. Sprawdź UI: `npm run test:ui`
 4. Skontaktuj się z zespołem dev
+
+

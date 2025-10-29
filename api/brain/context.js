@@ -61,3 +61,8 @@ export function updateSession(sessionId, updates) {
   sessions.set(sessionId, updated);
   return updated;
 }
+
+// Lekka statystyka sesji dla endpointu /api/brain/stats
+export function getSessionsCount() {
+  return sessions.size;
+}

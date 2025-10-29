@@ -1,7 +1,7 @@
 // Test script dla voice-to-order z mock danymi
-import fetch from 'node-fetch';
+// Node.js v18+ ma wbudowany fetch, nie potrzeba node-fetch
 
-const API_BASE = 'http://localhost:3003/api';
+const API_BASE = 'http://localhost:3000/api';
 
 // Mock UUID dla testów
 const MOCK_BUSINESS_ID = '550e8400-e29b-41d4-a716-446655440000';

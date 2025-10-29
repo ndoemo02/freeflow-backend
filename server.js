@@ -239,15 +239,37 @@ const httpServer = createServer(app);
 const wss = new WebSocketServer({ server: httpServer });
 
 wss.on("connection", (ws) => {
+  console.log("🔗 WebSocket connected");
+
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg.toString());
-      console.log("🎙️ WS Message:", data);
+      console.log("🧠 Amber received:", data.text);
+
+      // Wyślij odpowiedź z powrotem do klienta
+      ws.send(JSON.stringify({
+        reply: `Amber mówi: dostałam twoje "${data.text}" — przetwarzam.`,
+        ok: true,
+        timestamp: new Date().toISOString()
+      }));
     } catch (err) {
       console.error("❌ WS Parse error:", err);
+      ws.send(JSON.stringify({
+        ok: false,
+        error: "Failed to parse message",
+        timestamp: new Date().toISOString()
+      }));
     }
   });
-  ws.send(JSON.stringify({ ok: true, message: "FreeFlow STT WebSocket ready" }));
+
+  ws.on("close", () => console.log("❌ WebSocket disconnected"));
+
+  // Wyślij wiadomość powitalną
+  ws.send(JSON.stringify({ 
+    ok: true, 
+    message: "FreeFlow STT WebSocket ready",
+    timestamp: new Date().toISOString()
+  }));
 });
 
 // --- START SERVER ---

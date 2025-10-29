@@ -200,8 +200,8 @@ async function loadMenuCatalog(session) {
 
   try {
     let query = supabase
-      .from('menu_items')
-      .select('id,name,price,restaurant_id')
+      .from('menu_items_v2')
+      .select('id,name,price_pln,restaurant_id')
       .limit(500); // lekko, ale wystarczy
 
     if (lastId) {
@@ -268,7 +268,7 @@ async function loadMenuCatalog(session) {
     const catalog = menuItems.map(mi => ({
       id: mi.id,
       name: mi.name,
-      price: mi.price,
+      price: mi.price_pln,
       restaurant_id: mi.restaurant_id,
       restaurant_name: restaurantMap[mi.restaurant_id] || 'Unknown'
     }));
@@ -727,7 +727,7 @@ export async function detectIntent(text, session = null) {
     ];
 
     const orderKeywords = [
-      'zamow', 'poproshe', 'chce zamowic', 'zloz zamowienie', 'zamowic cos',
+      'zamow', 'poprosze', 'prosze', 'chce zamowic', 'zloz zamowienie', 'zamowic cos',
       'dodaj do zamowienia', 'zloz', 'wybieram', 'biore', 'wezme'
       // Usunięto 'chce' — zbyt ogólne, koliduje z "chce cos szybkiego" (find_nearby)
     ];
@@ -772,7 +772,8 @@ export async function detectIntent(text, session = null) {
         return { intent: 'menu_request', restaurant: targetRestaurant };
       }
       
-      if (allOrderKeywords.some(k => lower.includes(k))) {
+      const hasPizzaKeywordTR = /\bpizz/i.test(lower);
+      if (allOrderKeywords.some(k => lower.includes(k)) || hasPizzaKeywordTR) {
         console.log(`[intent-router] ✅ Order keyword found, returning create_order`);
         updateDebugSession({ 
           intent: 'create_order', 
@@ -807,6 +808,20 @@ export async function detectIntent(text, session = null) {
     }
 
     // 🔹 PRIORYTET 1: Sprawdź czy w tekście jest nazwa restauracji (fuzzy matching)
+    // 🚨 WAŻNE: Jeśli session.lastRestaurant istnieje i tekst zawiera słowa kluczowe zamówienia,
+    // NIE szukaj innych restauracji - user prawdopodobnie zamawia z już wybranej restauracji
+    const hasLastRestaurant = session?.lastRestaurant;
+    const hasOrderKeyword = allOrderKeywords.some(k => lower.includes(k));
+    const hasPizzaKeyword = /\bpizz/i.test(lower); // pizza/pizze/pizzy/pizzę etc.
+    const hasDishKeyword = /(margher|margarit|capric|diavol|hawaj|hawai|funghi|prosciut|salami|pepperoni|quattro|formagg|stagioni|parma|tonno|romana|vege|wegetar|carbonar)/i.test(lower);
+    
+    if (hasLastRestaurant && (hasOrderKeyword || hasPizzaKeyword || hasDishKeyword)) {
+      console.log('🎯 PRIORYTET 0.5: lastRestaurant exists + order keyword detected → skip restaurant search');
+      console.log(`   Using session restaurant: ${session.lastRestaurant.name}`);
+      // Nie szukaj innych restauracji - zwróć create_order z restauracją z sesji
+      return { intent: 'create_order', restaurant: session.lastRestaurant };
+    }
+
     // Jeśli tak, to najprawdopodobniej user chce wybrać restaurację lub zobaczyć menu
     console.log('🔍 PRIORYTET 1: Sprawdzam restauracje w tekście:', text);
 
@@ -999,9 +1014,10 @@ export async function handleIntent(intent, text, session) {
 
         try {
           const { data: menu, error } = await supabase
-            .from("menu_items")
-            .select("name, price")
+            .from("menu_items_v2")
+            .select("name, price_pln")
             .eq("restaurant_id", restaurant.id)
+            .eq("available", true)
             .limit(6);
 
           if (error) {
@@ -1020,7 +1036,7 @@ export async function handleIntent(intent, text, session) {
 
           return {
             reply: `W ${restaurant.name} dostępne: ${menu
-              .map((m) => `${m.name} (${Number(m.price).toFixed(2)} zł)`)
+              .map((m) => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`)
               .join(", ")}.`,
           };
         } catch (err) {

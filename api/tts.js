@@ -5,7 +5,7 @@ import { getVertexAccessToken } from '../utils/googleAuth.js';
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {
-    const { voice = "pl-PL-Wavenet-D", tone = "swobodny" } = options;
+    const { voice = process.env.TTS_VOICE || "pl-PL-Wavenet-A", tone = "swobodny" } = options;
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
 
@@ -33,7 +33,8 @@ export async function playTTS(text, options = {}) {
           audioConfig: {
             audioEncoding: "MP3",
             pitch,
-            speakingRate
+            speakingRate,
+            effectsProfileId: ["headphone-class-device"]
           }
         })
       }

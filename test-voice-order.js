@@ -1,7 +1,7 @@
 // Test script dla voice-to-order
-import fetch from 'node-fetch';
+// Node.js v18+ ma wbudowany fetch, nie potrzeba node-fetch
 
-const API_BASE = 'http://localhost:3003/api';
+const API_BASE = 'http://localhost:3000/api';
 
 // Test 1: Sprawdzenie health
 async function testHealth() {

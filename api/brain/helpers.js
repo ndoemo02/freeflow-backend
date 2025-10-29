@@ -133,29 +133,66 @@ export function extractSize(text = '') {
 
 export function extractLocation(text) {
   const locationKeywords = ['w', 'na', 'blisko', 'koło', 'niedaleko', 'obok', 'przy'];
-  const pattern = new RegExp(`(?:${locationKeywords.join('|')})\\s+([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)?)`, 'i');
+  const pattern = new RegExp(`(?:${locationKeywords.join('|')})\\s+([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)*)`, 'i');
   const match = text.match(pattern);
   
+  let location = null;
+  
   if (match) {
-    let location = match[1]?.trim();
-    const blacklist = ['tutaj', 'tu', 'szybko', 'pobliżu', 'okolicy', 'menu', 'coś', 'cos', 'azjatyckiego', 'azjatyckie', 'szybkiego', 'dobrego', 'innego'];
-    const locationLower = location.toLowerCase();
-    
-    if (blacklist.includes(locationLower) || blacklist.some(word => locationLower.startsWith(word + ' '))) {
-      return null;
+    location = match[1]?.trim();
+  } else {
+    // Fallback: Spróbuj wyłapać miasto bez przedimka (np. "Piekary Śląskie")
+    const cityPattern = /\b([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)*)\b/g;
+    const cities = text.match(cityPattern);
+    if (cities && cities.length > 0) {
+      // Weź ostatnie słowo z dużej litery (najprawdopodobniej miasto)
+      location = cities[cities.length - 1];
     }
-    
-    // Normalize case endings
-    location = location
-      .replace(/ach$/i, 'y')
-      .replace(/iu$/i, '')
-      .replace(/ie$/i, 'a')
-      .replace(/ami$/i, 'a');
-    
-    return location;
   }
   
-  return null;
+  if (!location) return null;
+  
+  const blacklist = ['tutaj', 'tu', 'szybko', 'pobliżu', 'okolicy', 'menu', 'coś', 'cos', 'azjatyckiego', 'azjatyckie', 'szybkiego', 'dobrego', 'innego', 'Zamów', 'Pokaż', 'Znajdź', 'Chcę'];
+  const locationLower = location.toLowerCase();
+  
+  if (blacklist.includes(locationLower) || blacklist.some(word => locationLower.startsWith(word + ' '))) {
+    return null;
+  }
+  
+  // Normalize case endings for Polish cities
+  // 🔧 Obsługa złożonych nazw (np. "Piekarach Śląskich" → "Piekary Śląskie")
+  location = location
+    .split(' ')
+    .map(word => {
+      // Priorytety: najpierw dłuższe końcówki, potem krótsze
+      if (/ich$/i.test(word)) {
+        return word.replace(/ich$/i, 'ie');  // Śląskich → Śląskie (najpierw!)
+      }
+      if (/im$/i.test(word)) {
+        return word.replace(/im$/i, 'ie');   // Śląskim → Śląskie
+      }
+      if (/ach$/i.test(word)) {
+        return word.replace(/ach$/i, 'y');  // Piekarach → Piekary
+      }
+      if (/ami$/i.test(word)) {
+        return word.replace(/ami$/i, 'a');   // Gliwicami → Gliwica
+      }
+      if (/iu$/i.test(word)) {
+        return word.replace(/iu$/i, '');     // Bytomiu → Bytom
+      }
+      // Wyjątek: Nie zamieniaj "-ie" jeśli słowo już jest w mianowniku (np. "Śląskie", "Pomorskie")
+      const adjectiveEndings = /skie$/i;
+      if (adjectiveEndings.test(word)) {
+        return word; // Zostaw bez zmian
+      }
+      if (/ie$/i.test(word)) {
+        return word.replace(/ie$/i, 'a');    // Katowicie → Katowica
+      }
+      return word;
+    })
+    .join(' ');
+  
+  return location;
 }
 
 const CUISINE_MAP = {

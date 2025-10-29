@@ -24,8 +24,27 @@ export const supabase = createClient(
 );
 
 // --- Health check ---
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, message: 'Amber is alive 🧠💬' });
+app.get('/api/health', async (req, res) => {
+  const health = {
+    ok: true,
+    node: process.version,
+    service: 'FreeFlow Brain',
+    version: process.env.npm_package_version || 'dev',
+    timestamp: new Date().toISOString(),
+    supabase: { ok: false, time: null }
+  };
+  try {
+    const t0 = performance.now();
+    const { data, error } = await supabase.from('restaurants').select('id').limit(1);
+    const t1 = performance.now();
+    if (error) throw error;
+    health.supabase.ok = true;
+    health.supabase.time = `${(t1 - t0).toFixed(1)} ms`;
+  } catch (err) {
+    health.ok = false;
+    health.supabase.error = err.message;
+  }
+  res.json(health);
 });
 
 // --- Environment check ---
@@ -40,12 +59,22 @@ app.get('/api/env-check', (req, res) => {
 // === AMBER BRAIN ===
 app.post("/api/brain", async (req, res) => {
   try {
+    const body = req.body || {};
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) {
+      return res.status(400).json({ ok: false, error: 'missing_text' });
+    }
     const brainRouter = await import("./brain/brainRouter.js");
     return brainRouter.default(req, res);
   } catch (error) {
     console.error("❌ Brain error:", error);
     res.status(500).json({ ok: false, error: error.message });
   }
+});
+
+// 405 dla metod innych niż POST
+app.get('/api/brain', (req, res) => {
+  res.status(405).json({ ok: false, error: 'method_not_allowed' });
 });
 
     // Optional: reset session endpoint
@@ -70,6 +99,18 @@ app.post("/api/brain/router", async (req, res) => {
     return brainRouter.default(req, res);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Brain stats (lekki endpoint do testów)
+app.get('/api/brain/stats', async (req, res) => {
+  try {
+    const ctx = await import('./brain/context.js');
+    const getSessionsCount = ctx.getSessionsCount || (() => null);
+    const count = typeof getSessionsCount === 'function' ? getSessionsCount() : null;
+    res.json({ ok: true, sessions: count, timestamp: Date.now() });
+  } catch (e) {
+    res.json({ ok: true, sessions: null, note: 'stats minimal' });
   }
 });
 

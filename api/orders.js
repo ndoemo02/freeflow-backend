@@ -52,7 +52,19 @@ export async function createOrderEndpoint(req, res) {
 // ✅ Funkcje normalize i levenshtein zaimportowane z helpers.js (deduplikacja)
 
 function findBestMatch(list, query, field = "name") {
-  const normQuery = normalizeTxt(query);
+  const safeString = (v) => {
+    if (v == null) return "";
+    if (typeof v === "string") return v;
+    if (typeof v === "number") return String(v);
+    if (typeof v === "object") {
+      // Preferuj .name jeśli istnieje (np. restauracja)
+      if (v.name) return String(v.name);
+      try { return JSON.stringify(v); } catch { return String(v); }
+    }
+    return String(v);
+  };
+
+  const normQuery = normalizeTxt(safeString(query));
   let best = null;
   let bestScore = Infinity;
   let exactMatch = null;
@@ -60,7 +72,7 @@ function findBestMatch(list, query, field = "name") {
   console.log(`🔍 Szukam "${query}" (znormalizowane: "${normQuery}") w ${list.length} pozycjach`);
 
   for (const el of list) {
-    const name = normalizeTxt(el[field]);
+    const name = normalizeTxt(safeString(el[field]));
     
     // Sprawdź dokładne dopasowanie (includes)
     if (name.includes(normQuery)) {
@@ -222,8 +234,19 @@ export default async function handler(req, res) {
     let { message, restaurant_name, user_email } = req.body;
     
     // Bezpieczny fallback dla undefined values
-    message = message || "";
-    restaurant_name = restaurant_name || "";
+    const safeString = (v) => {
+      if (v == null) return "";
+      if (typeof v === "string") return v;
+      if (typeof v === "number") return String(v);
+      if (typeof v === "object") {
+        if (v.name) return String(v.name);
+        try { return JSON.stringify(v); } catch { return String(v); }
+      }
+      return String(v);
+    };
+
+    message = safeString(message);
+    restaurant_name = safeString(restaurant_name);
     user_email = user_email || "";
     
     console.log("🟡 INPUT:", { message, restaurant_name, user_email });

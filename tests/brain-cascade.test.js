@@ -121,10 +121,12 @@ describe('🧠 Brain API - Cascade Tests', () => {
     });
     
     it('should remember last location', async () => {
-      await callBrain('Gdzie zjeść w Bytomiu?', sessionId);
+      // Uwaga: w bazie mamy tylko Piekary Śląskie, więc test pamięci lokalizacji
+      // sprawdzamy na tej miejscowości
+      await callBrain('Gdzie zjeść w Piekarach?', sessionId);
       const result = await callBrain('Pokaż restauracje', sessionId);
       expect(result.ok).toBe(true);
-      expect(result.context?.last_location).toMatch(/Bytom/i);
+      expect(result.context?.last_location).toMatch(/Piekary/i);
     });
   });
   
