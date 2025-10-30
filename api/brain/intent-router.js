@@ -473,6 +473,13 @@ export async function detectIntent(text, session = null) {
 
     const lower = normalizeTxt(normalizedText);
 
+    // 🔹 SUPER-EARLY EXIT: Pytania "gdzie zjeść …" zawsze traktuj jako find_nearby
+    // niezależnie od kontekstu sesji (żeby nie przechodziło w create_order gdy jest "pizza")
+    if (/\bgdzie\b/.test(lower)) {
+      updateDebugSession({ intent: 'find_nearby', restaurant: null, sessionId: session?.id || null, confidence: 0.85 });
+      return { intent: 'find_nearby', restaurant: null };
+    }
+
     // ——— CONFIRM FLOW - DELEGATED TO boostIntent() in brainRouter.js ———
     // Logika potwierdzania zamówień jest teraz obsługiwana przez:
     // 1. boostIntent() w brainRouter.js (wykrywa confirm_order/cancel_order)
@@ -619,6 +626,16 @@ export async function detectIntent(text, session = null) {
         // ⚠️ ALE: jeśli tekst zawiera nazwę restauracji, to nie zwracaj clarify_order
         // (user może mówić np. "klaps burger" = nazwa restauracji, a nie zamówienie)
         if (parsed.unavailable && parsed.unavailable.length > 0 && parsed.needsClarification) {
+          // Jeśli parser i tak coś znalazł (available), preferuj create_order zamiast clarify
+          if ((parsed.available && parsed.available.length > 0) || (parsed.groups && parsed.groups.length > 0)) {
+            updateDebugSession({
+              intent: 'create_order',
+              restaurant: parsed.groups?.[0]?.restaurant_name || null,
+              sessionId: session?.id || null,
+              confidence: 0.82
+            });
+            return { intent: 'create_order', parsedOrder: parsed };
+          }
           const missing = parsed.unavailable.join(', ');
           const restaurantName = session?.lastRestaurant?.name || 'tym menu';
           console.log(`⚠️ Unavailable items detected: ${missing} in ${restaurantName}`);

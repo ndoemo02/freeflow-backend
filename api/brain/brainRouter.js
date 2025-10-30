@@ -595,6 +595,11 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
     return 'find_nearby';
   }
 
+  // "Nie, pokaż inne restauracje" → change_restaurant (globalnie, poza confirm context)
+  if ((/\bnie\b/.test(lower) && /(pokaz|pokaz|pokaz|pokaż|inne)/i.test(lower) && /(restaurac|opcje)/i.test(lower)) && ctx?.expectedContext !== 'confirm_order') {
+    return 'change_restaurant';
+  }
+
   // Wieloelementowe zamowienia: "zamow ... i ..." → create_order
   if (/(zamow|zamowic|zamowisz|zamowmy|poprosze|prosze)/i.test(lower) && /\bi\b/.test(lower) && /(pizza|pizz|burger|kebab)/i.test(lower)) {
     return 'create_order';
@@ -660,6 +665,12 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
     // Oczekiwany kontekst: "potwierdź zamówienie" (NAJWYŻSZY PRIORYTET!)
     if (ctx.expectedContext === 'confirm_order') {
       console.log('🧠 SmartContext: expectedContext=confirm_order detected, checking user response...');
+
+      // "Nie, pokaż inne ..." → zmiana restauracji nawet w confirm flow
+      if (/\bnie\b/.test(lower) && /(pokaz|pokaż|inne)/i.test(lower) && /(restaurac|opcje)/i.test(lower)) {
+        console.log('🧠 SmartContext Boost → intent=change_restaurant (nie + inne/pokaż w confirm context)');
+        return 'change_restaurant';
+      }
 
       // Jeśli użytkownik wypowiada pełną komendę zamówienia (z daniem/ilością), traktuj jako NOWE create_order
       const hasDishOrQty = /(pizza|pizz|burger|kebab|tiramisu|salat|słat|zupa|makaron)/i.test(lower) || /\b(\d+|dwie|trzy|cztery|piec|pi\u0119c|szesc|siedem|osiem|dziewiec|dziesiec)\b/i.test(lower);
@@ -1141,6 +1152,22 @@ export default async function handler(req, res) {
     console.log('[brainRouter] 🧠 Calling detectIntent with:', { text, sessionId });
     const currentSession = getSession(sessionId);
     console.log('[brainRouter] 🧠 Current session:', currentSession);
+    // 🔹 Pre-intent short-circuits
+    const normalizedEarly = normalizeTxt(text || '');
+    // 1) "nie" w confirm → anuluj natychmiast
+    if ((currentSession?.expectedContext === 'confirm_order' || currentSession?.pendingOrder) && /^nie$/.test((text||'').trim().toLowerCase())) {
+      updateSession(sessionId, { expectedContext: null, pendingOrder: null, lastIntent: 'cancel_order' });
+      return res.status(200).json({ ok: true, intent: 'cancel_order', reply: 'Zamówienie anulowałam.', context: getSession(sessionId) });
+    }
+    // 2) "nie, pokaż inne ..." → zmiana restauracji niezależnie od kontekstu
+    if (/\bnie\b/.test(normalizedEarly) && /(pokaz|pokaż|inne)/.test(normalizedEarly) && /(restaurac|opcje)/.test(normalizedEarly)) {
+      updateSession(sessionId, { lastIntent: 'change_restaurant' });
+      // Minimalna odpowiedź bez modelu
+      const replyQuick = 'Jasne, zmieńmy lokal — powiedz gdzie szukać albo wybierz inną restaurację.';
+      return res.status(200).json({ ok: true, intent: 'change_restaurant', reply: replyQuick, context: getSession(sessionId) });
+    }
+    let forcedIntent = null;
+
     const { intent: rawIntent, restaurant, parsedOrder, confidence: rawConfidence } = await detectIntent(text, currentSession);
     
     // 🧠 [DEBUG] 2C: Intent flow logging - detectIntent result
@@ -1163,7 +1190,7 @@ export default async function handler(req, res) {
 
     // 🔹 Krok 1.5: SmartContext Boost — warstwa semantyczna
     // ⚠️ NIE ZMIENIAJ INTENCJI jeśli parsedOrder istnieje (early dish detection zadziałał)
-    let intent = rawIntent;
+    let intent = forcedIntent || rawIntent;
     if (parsedOrder?.any) {
       console.log('🔒 SmartContext: skipping boost (parsedOrder exists)');
     } else {
@@ -1183,7 +1210,32 @@ export default async function handler(req, res) {
       intent = boostedIntent;
       
       // --- Alias normalization patch ---
-      if (intent === "confirm") intent = "confirm_order";
+      // Mapuj 'confirm' → 'confirm_order' tylko jeśli oczekujemy potwierdzenia
+      if (intent === "confirm" && currentSession?.expectedContext === 'confirm_order') {
+        intent = "confirm_order";
+      }
+      // Twarda reguła: jeśli oczekujemy potwierdzenia i user mówi tylko "nie" → cancel_order
+      if (currentSession?.expectedContext === 'confirm_order') {
+        const txt = (text || '').trim().toLowerCase();
+        if (/^nie(\W.*)?$/.test(txt)) {
+          intent = 'cancel_order';
+        }
+      }
+      // Dodatkowe bezpieczeństwo: jeśli ostatni krok to create_order i użytkownik mówi tylko "nie"
+      // potraktuj jako anulowanie (na wypadek utraty expectedContext)
+      {
+        const txt = (text || '').trim().toLowerCase();
+        if (/^nie$/.test(txt) && currentSession?.lastIntent === 'create_order') {
+          intent = 'cancel_order';
+        }
+      }
+      // Globalny boost: "nie, pokaż inne ..." → change_restaurant (o ile nie czekamy na confirm)
+      if (!currentSession?.expectedContext) {
+        const l = normalizeTxt(text || '');
+        if (/\bnie\b/.test(l) && /(pokaz|pokaz|pokaż|inne)/.test(l) && /(restaurac|opcje)/.test(l)) {
+          intent = 'change_restaurant';
+        }
+      }
       console.log(`🔄 Intent alias normalization: ${boostedIntent} → ${intent}`);
       
       // 🧠 [DEBUG] 2C: Intent flow logging - boostIntent result
@@ -1573,6 +1625,35 @@ export default async function handler(req, res) {
             }
           } else {
             replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}.`;
+            // 🔹 Auto-show menu jeśli nie ma aktywnego zamówienia
+            try {
+              const sNow = getSession(sessionId) || {};
+              const hasPending = !!(sNow?.pendingOrder && Array.isArray(sNow.pendingOrder.items) && sNow.pendingOrder.items.length);
+              if (!hasPending) {
+                const { data: menu } = await supabase
+                  .from("menu_items_v2")
+                  .select("id, name, price_pln, available, category")
+                  .eq("restaurant_id", restaurant.id)
+                  .order("name", { ascending: true });
+
+                const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
+                const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
+                const preferred = (menu || []).filter(m => {
+                  const c = String(m.category || '').toLowerCase();
+                  const n = String(m.name || '').toLowerCase();
+                  if (bannedCategories.some(b => c.includes(b))) return false;
+                  if (bannedNames.some(b => n.includes(b))) return false;
+                  return true;
+                });
+                const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
+                updateSession(sessionId, { last_menu: shortlist, lastRestaurant: restaurant });
+                replyCore = `W ${restaurant.name} dostępne m.in.: ` +
+                  shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") +
+                  ". Co chciałbyś zamówić?";
+              }
+            } catch (e) {
+              console.warn('⚠️ auto menu after select (detectIntent branch) failed:', e?.message);
+            }
           }
           break;
         }
@@ -1657,6 +1738,35 @@ export default async function handler(req, res) {
           }
         } else {
           replyCore = `Wybrano restaurację ${chosen.name}${chosen.city ? ` (${chosen.city})` : ''}.`;
+          // 🔹 Auto-show menu jeśli nie ma aktywnego zamówienia
+          try {
+            const sNow = getSession(sessionId) || {};
+            const hasPending = !!(sNow?.pendingOrder && Array.isArray(sNow.pendingOrder.items) && sNow.pendingOrder.items.length);
+            if (!hasPending) {
+              const { data: menu } = await supabase
+                .from("menu_items_v2")
+                .select("id, name, price_pln, available, category")
+                .eq("restaurant_id", chosen.id)
+                .order("name", { ascending: true });
+
+              const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
+              const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
+              const preferred = (menu || []).filter(m => {
+                const c = String(m.category || '').toLowerCase();
+                const n = String(m.name || '').toLowerCase();
+                if (bannedCategories.some(b => c.includes(b))) return false;
+                if (bannedNames.some(b => n.includes(b))) return false;
+                return true;
+              });
+              const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
+              updateSession(sessionId, { last_menu: shortlist, lastRestaurant: chosen });
+              replyCore = `W ${chosen.name} dostępne m.in.: ` +
+                shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") +
+                ". Co chciałbyś zamówić?";
+            }
+          } catch (e) {
+            console.warn('⚠️ auto menu after select (list branch) failed:', e?.message);
+          }
         }
         break;
       }
@@ -1809,7 +1919,7 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
         console.log('🚫 cancel_order intent detected');
         // Wyzeruj oczekujące zamówienie i kontekst
         updateSession(sessionId, { expectedContext: null, pendingOrder: null });
-        replyCore = "Zamówienie anulowano.";
+        replyCore = "Zamówienie anulowałam.";
         break;
       }
 
@@ -1819,6 +1929,12 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
         // 🚨 Pre-check: jeśli brak last_location w sesji → wymaga lokalizacji
         const s = getSession(sessionId) || {};
         if (!s?.last_location && !s?.lastRestaurant) {
+          // Jeśli użytkownik używa fraz typu "gdzie"/"w pobliżu" → to jest jednak find_nearby
+          const n = normalize(text || '');
+          if (/\bgdzie\b/.test(n) || /w poblizu|w pobli/u.test(n)) {
+            const prompt = "Brak lokalizacji. Podaj nazwę miasta (np. Piekary) lub powiedz 'w pobliżu'.";
+            return res.status(200).json({ ok: true, intent: "find_nearby", reply: prompt, fallback: true, context: s });
+          }
           replyCore = "Brak lokalizacji. Podaj nazwę miasta lub powiedz 'w pobliżu'.";
           return res.status(200).json({ ok: true, intent: "create_order", reply: replyCore, fallback: true, context: s });
         }
