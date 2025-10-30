@@ -206,3 +206,6 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
+// --- KeepAlive (prod only) ---
+import "./utils/keepAlive.js";
+
