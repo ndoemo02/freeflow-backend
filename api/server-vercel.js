@@ -129,6 +129,18 @@ app.get('/api/brain/stats', async (req, res) => {
   }
 });
 
+// === PING (keep-alive) ===
+app.get('/api/ping', async (req, res) => {
+  try {
+    const ping = await import('./ping.js');
+    return ping.default(req, res);
+  } catch (err) {
+    const now = new Date().toISOString();
+    console.log(`[PING] fallback at ${now}`);
+    return res.status(200).json({ ok: true, message: 'keep-alive pong 🧠', timestamp: now });
+  }
+});
+
 // === RESTAURANTS ===
 app.get("/api/restaurants", async (req, res) => {
   try {
