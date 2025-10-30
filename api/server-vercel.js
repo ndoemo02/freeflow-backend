@@ -8,7 +8,28 @@ import { createClient } from '@supabase/supabase-js';
 // --- App setup ---
 const app = express();
 app.use(express.json());
-app.use(cors());
+// CORS – pełna konfiguracja z whitelistą domen
+const CORS_WHITELIST = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://freeflow-frontend-seven.vercel.app',
+  'https://freeflow-frontend.vercel.app'
+];
+const corsOptions = {
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true); // pozwól na narzędzia CLI/testy bez nagłówka Origin
+    const allowed = CORS_WHITELIST.includes(origin);
+    return allowed ? callback(null, true) : callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET','HEAD','PUT','PATCH','POST','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','X-Requested-With'],
+  exposedHeaders: ['Content-Length','ETag'],
+  optionsSuccessStatus: 204,
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(morgan('tiny'));
 
 // --- Env sanity ---
