@@ -13,6 +13,8 @@ export const supabase = createClient(
 let openaiClient = null;
 // Simple in-memory cache (LRU up to 10 entries)
 const ttsCache = new Map();
+// Cache dla krótkiej stylizacji GPT-4o (max 20 wpisów)
+const stylizeCache = new Map();
 function getOpenAI() {
   if (openaiClient) return openaiClient;
   const apiKey = process.env.OPENAI_API_KEY || '';
@@ -99,20 +101,40 @@ export async function stylizeWithGPT4o(rawText, intent = 'neutral') {
     if (process.env.NODE_ENV === 'test') return rawText;
     const openai = getOpenAI();
     if (!openai) return rawText;
+    const key = `${rawText}|${intent}`;
+    if (stylizeCache.has(key)) return stylizeCache.get(key);
     const system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania), ciepły lokalny ton, lekko dowcipny. Nie używaj list, numeracji ani nawiasów. Nie dodawaj informacji, nie używaj znaczników i SSML. Intencja: ${intent}.`;
-    const resp = await openai.chat.completions.create({
-      model,
-      temperature: 0.6,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `Przeredaguj na mowę rozmowną:
-${rawText}` }
-      ]
-    });
-    const out = resp?.choices?.[0]?.message?.content?.trim();
+    let out = '';
+    if (process.env.OPENAI_STREAM === 'true') {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Przeredaguj na mowę rozmowną:\n${rawText}` }
+        ],
+        temperature: 0.6,
+        stream: true
+      });
+      for await (const chunk of completion) {
+        out += chunk?.choices?.[0]?.delta?.content || '';
+      }
+    } else {
+      const resp = await openai.chat.completions.create({
+        model,
+        temperature: 0.6,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Przeredaguj na mowę rozmowną:\n${rawText}` }
+        ]
+      });
+      out = resp?.choices?.[0]?.message?.content?.trim() || '';
+    }
     if (!out) return rawText;
     // bezpieczeństwo: usuń potencjalne znaczniki
-    return out.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const cleaned = out.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    stylizeCache.set(key, cleaned);
+    if (stylizeCache.size > 20) stylizeCache.delete(stylizeCache.keys().next().value);
+    return cleaned;
   } catch (e) {
     console.warn('stylizeWithGPT4o error:', e?.message || e);
     return rawText;
@@ -147,9 +169,8 @@ export async function playTTS(text, options = {}) {
         body: JSON.stringify({
           input: { text: plain },
           voice: { languageCode: 'pl-PL', name: 'pl-PL-Wavenet-D' },
-          audioConfig: process.env.TTS_STREAMING === 'true'
-            ? { audioEncoding: 'MP3', enableTimePointing: ['SSML_MARK'] }
-            : { audioEncoding: 'MP3' }
+          // v1 API nie wspiera enableTimePointing – zawsze czysty MP3
+          audioConfig: { audioEncoding: 'MP3' }
         })
       });
       if (!response.ok) {
@@ -170,12 +191,8 @@ export async function playTTS(text, options = {}) {
     let reqBody = {
       input: /<\s*speak[\s>]/i.test(text || '') ? { ssml: text } : { text },
       voice: { languageCode: "pl-PL", name: voice },
-      audioConfig: (() => {
-        if (isChirpHD) return { audioEncoding: 'MP3' };
-        const base = { audioEncoding: 'MP3', pitch, speakingRate };
-        if (process.env.TTS_STREAMING === 'true') base.enableTimePointing = ['SSML_MARK'];
-        return base;
-      })()
+      // Bez enableTimePointing dla stabilności
+      audioConfig: (isChirpHD ? { audioEncoding: 'MP3' } : { audioEncoding: 'MP3', pitch, speakingRate })
     };
     console.log('🔊 Using Vertex: ' + voice);
     const cacheKeyVertex = `${JSON.stringify(reqBody.input)}|${voice}|${tone}`;
@@ -203,9 +220,8 @@ export async function playTTS(text, options = {}) {
         delete payload.input.ssml;
       }
       // pitch/speakingRate obsługiwane – zostaw, ale usuń efekty
-      payload.audioConfig = (process.env.TTS_STREAMING === 'true')
-        ? { audioEncoding: 'MP3', enableTimePointing: ['SSML_MARK'], pitch, speakingRate }
-        : { audioEncoding: 'MP3', pitch, speakingRate };
+      // v1 fallback – bez enableTimePointing
+      payload.audioConfig = { audioEncoding: 'MP3', pitch, speakingRate };
       payload.voice = { languageCode: "pl-PL", name: "pl-PL-Wavenet-D" };
       console.log('🔊 Using Wavenet: ' + payload.voice.name);
       response = await fetch(endpoint, {
