@@ -117,6 +117,43 @@ app.post("/api/brain/router", async (req, res) => {
   }
 });
 
+// === ADMIN ENDPOINTS ===
+app.get('/api/admin/users-count', async (req, res) => {
+  try {
+    const mod = await import('./admin/users-count.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/partners-count', async (req, res) => {
+  try {
+    const mod = await import('./admin/partners-count.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/admin/backup', async (req, res) => {
+  try {
+    const mod = await import('./admin/backup.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.patch('/api/admin/tts', async (req, res) => {
+  try {
+    const mod = await import('./admin/tts.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// === LOGS ===
+app.get('/api/logs', async (req, res) => {
+  try {
+    const mod = await import('./logs.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Brain stats (lekki endpoint do testów)
 app.get('/api/brain/stats', async (req, res) => {
   try {
