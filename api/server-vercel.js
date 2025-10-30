@@ -8,17 +8,22 @@ import { createClient } from '@supabase/supabase-js';
 // --- App setup ---
 const app = express();
 app.use(express.json());
-// CORS (tuż po dotenv.config): tylko podane domeny i metody
-app.use(
-  cors({
-    origin: [
-      'https://freeflow-frontend-seven.vercel.app',
-      'https://freeflow-frontend.vercel.app'
-    ],
-    methods: ['GET', 'POST', 'OPTIONS'],
-    credentials: true
-  })
-);
+// CORS (tuż po dotenv.config): prod = Vercel, dev = localhost:5173
+const CORS_ORIGINS_PROD = [
+  'https://freeflow-frontend-seven.vercel.app',
+  'https://freeflow-frontend.vercel.app'
+];
+const CORS_ORIGINS_DEV = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000'
+];
+const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
+  ? CORS_ORIGINS_PROD
+  : [...CORS_ORIGINS_PROD, ...CORS_ORIGINS_DEV];
+app.use(cors({ origin: ALLOWED_ORIGINS, methods: ['GET','POST','OPTIONS'], credentials: true }));
+// Express 5: '*' nie jest wspierane przez path-to-regexp; użyj wyrażenia regularnego lub usuń preflight handler
+app.options(/.*/, cors({ origin: ALLOWED_ORIGINS }));
 app.use(morgan('tiny'));
 
 // --- Env sanity ---

@@ -2,7 +2,7 @@
 import { detectIntent, normalizeTxt } from "./intent-router.js";
 import { supabase } from "../_supabase.js";
 import { getSession, updateSession } from "./context.js";
-import { playTTS } from "../tts.js";
+import { playTTS, formatTTSReply, applySSMLStyling } from "../tts.js";
 import crypto from "node:crypto";
 import { extractLocation } from "./helpers.js";
 
@@ -1270,6 +1270,38 @@ export default async function handler(req, res) {
     switch (intent) {
       case "find_nearby": {
         console.log('🧠 find_nearby intent detected');
+        // Natural distance formatter: <1km => meters; otherwise kilometers with Polish declension
+        const pluralPl = (n, one, few, many) => {
+          const mod10 = n % 10, mod100 = n % 100;
+          if (n === 1) return one;
+          if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
+          return many;
+        };
+        const formatDistance = (km) => {
+          if (km == null || !isFinite(km)) return '';
+          if (km < 1) {
+            const m = Math.max(1, Math.round(km * 1000));
+            return `${m} ${pluralPl(m,'metr','metry','metrów')}`;
+          }
+          const k = Math.round(km * 10) / 10;
+          const whole = Math.round(k);
+          return `${k} ${pluralPl(whole,'kilometr','kilometry','kilometrów')}`;
+        };
+        function sanitizePlaceName(name, cuisine, category) {
+          try {
+            const safeName = (name || '').toString();
+            const all = [cuisine, category].filter(Boolean).join(' ').toLowerCase();
+            if (all && safeName.toLowerCase().includes(all)) return safeName;
+            const blacklist = ["hotel","restauracja","burger","hamburger","bar"];
+            for (const bad of blacklist) {
+              if (safeName.toLowerCase().includes(bad) && all.includes(bad)) return safeName;
+            }
+            if (cuisine && !safeName.toLowerCase().includes(String(cuisine).toLowerCase())) {
+              return `${safeName} – ${cuisine}`;
+            }
+            return safeName;
+          } catch { return name; }
+        }
 
         // 🧭 GeoContext Layer: sprawdź czy w tekście jest lokalizacja
         let location = extractLocation(text);
@@ -1339,7 +1371,10 @@ export default async function handler(req, res) {
                 return { ...r, distance };
               }).sort((a,b) => a.distance - b.distance);
               const top = all.slice(0, 3);
-              const displayList = top.map((r,i)=>`${i+1}. ${r.name}${r.cuisine_type?` - ${r.cuisine_type}`:''} (${r.distance.toFixed(1)} km)`).join('\n');
+              const displayList = top.map((r,i)=>{
+                const displayName = sanitizePlaceName(r.name, r.cuisine_type, r.category);
+                return `${i+1}. ${displayName} (${formatDistance(r.distance)})`;
+              }).join('\n');
               updateSession(sessionId, {
                 last_location: null,
                 last_restaurants_list: top,
@@ -1349,11 +1384,23 @@ export default async function handler(req, res) {
               // 🔊 TTS także dla tej wczesnej odpowiedzi
               let audioContent = null;
               try {
-                if (req.body?.includeTTS) {
-                  audioContent = await playTTS(reply, {
-                    voice: process.env.TTS_VOICE || "pl-PL-Wavenet-A",
-                    tone: getSession(sessionId)?.tone || "swobodny"
-                  });
+                if (req.body?.includeTTS && process.env.NODE_ENV !== 'test') {
+                  let styled = reply;
+                  const SIMPLE_TTS = process.env.TTS_SIMPLE === 'true' || process.env.TTS_MODE === 'basic';
+                  if (SIMPLE_TTS) {
+                    audioContent = await playTTS(reply, {
+                      voice: process.env.TTS_VOICE || 'pl-PL-Wavenet-D',
+                      tone: getSession(sessionId)?.tone || 'swobodny'
+                    });
+                  } else {
+                    try { styled = await formatTTSReply(reply, 'find_nearby'); } catch {}
+                    const ssml = applySSMLStyling(styled, 'find_nearby');
+                    console.log('[TTS] SSML active for intent:', 'find_nearby');
+                    audioContent = await playTTS(ssml, {
+                      voice: process.env.TTS_VOICE || 'pl-PL-Chirp3-HD-Erinome',
+                      tone: getSession(sessionId)?.tone || 'swobodny'
+                    });
+                  }
                 }
               } catch (e) {
                 console.warn('⚠️ TTS (nearby lat/lng) failed:', e?.message);
@@ -1442,7 +1489,10 @@ export default async function handler(req, res) {
               expectedContext: 'select_restaurant'
             });
 
-            const list = top.map((r, i) => `${i+1}. ${r.name}${r.cuisine_type ? ` - ${r.cuisine_type}` : ''} (${r.distance.toFixed(1)} km)`).join('\n');
+            const list = top.map((r, i) => {
+              const displayName = sanitizePlaceName(r.name, r.cuisine_type, r.category);
+              return `${i+1}. ${displayName} (${formatDistance(r.distance)})`;
+            }).join('\n');
             replyCore = `W pobliżu mam:\n${list}\n\nKtórą wybierasz?`;
             break;
           }
@@ -2546,13 +2596,25 @@ KONTEKST MIEJSCA:
     const { includeTTS } = req.body;
     let audioContent = null;
     
-    if (includeTTS && reply) {
+    if (includeTTS && reply && process.env.NODE_ENV !== 'test') {
       try {
         console.log('🎤 Generating TTS for reply...');
-        audioContent = await playTTS(reply, { 
-          voice: "pl-PL-Wavenet-D", 
-          tone: currentSession?.tone || "swobodny" 
-        });
+        const SIMPLE_TTS = process.env.TTS_SIMPLE === 'true' || process.env.TTS_MODE === 'basic';
+        if (SIMPLE_TTS) {
+          audioContent = await playTTS(reply, { 
+            voice: process.env.TTS_VOICE || 'pl-PL-Wavenet-D', 
+            tone: currentSession?.tone || 'swobodny' 
+          });
+        } else {
+          let styled = reply;
+          try { styled = await formatTTSReply(reply, intent || 'neutral'); } catch {}
+          const ssml = applySSMLStyling(styled, intent || 'neutral');
+          console.log('[TTS] SSML active for intent:', intent || 'neutral');
+          audioContent = await playTTS(ssml, { 
+            voice: process.env.TTS_VOICE || 'pl-PL-Chirp3-HD-Erinome', 
+            tone: currentSession?.tone || 'swobodny' 
+          });
+        }
         console.log('✅ TTS audio generated successfully');
       } catch (err) {
         console.error('❌ TTS generation failed:', err.message);
