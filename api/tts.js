@@ -90,6 +90,35 @@ ${pre}` } ]
   }
 }
 
+// Krótka parafraza mówiona Amber – bez SSML, max 2 zdania, brak list i numeracji
+export async function stylizeWithGPT4o(rawText, intent = 'neutral') {
+  try {
+    if (!rawText || typeof rawText !== 'string') return rawText;
+    const model = process.env.OPENAI_MODEL;
+    if (!model) return rawText;
+    if (process.env.NODE_ENV === 'test') return rawText;
+    const openai = getOpenAI();
+    if (!openai) return rawText;
+    const system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania), ciepły lokalny ton, lekko dowcipny. Nie używaj list, numeracji ani nawiasów. Nie dodawaj informacji, nie używaj znaczników i SSML. Intencja: ${intent}.`;
+    const resp = await openai.chat.completions.create({
+      model,
+      temperature: 0.6,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: `Przeredaguj na mowę rozmowną:
+${rawText}` }
+      ]
+    });
+    const out = resp?.choices?.[0]?.message?.content?.trim();
+    if (!out) return rawText;
+    // bezpieczeństwo: usuń potencjalne znaczniki
+    return out.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  } catch (e) {
+    console.warn('stylizeWithGPT4o error:', e?.message || e);
+    return rawText;
+  }
+}
+
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {

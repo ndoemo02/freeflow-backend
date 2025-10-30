@@ -2,7 +2,7 @@
 import { detectIntent, normalizeTxt } from "./intent-router.js";
 import { supabase } from "../_supabase.js";
 import { getSession, updateSession } from "./context.js";
-import { playTTS, formatTTSReply, applySSMLStyling } from "../tts.js";
+import { playTTS, stylizeWithGPT4o } from "../tts.js";
 import crypto from "node:crypto";
 import { extractLocation } from "./helpers.js";
 
@@ -1393,10 +1393,12 @@ export default async function handler(req, res) {
                       tone: getSession(sessionId)?.tone || 'swobodny'
                     });
                   } else {
-                    try { styled = await formatTTSReply(reply, 'find_nearby'); } catch {}
-                    const ssml = applySSMLStyling(styled, 'find_nearby');
-                    console.log('[TTS] SSML active for intent:', 'find_nearby');
-                    audioContent = await playTTS(ssml, {
+                    try {
+                      if (process.env.OPENAI_MODEL) {
+                        styled = await stylizeWithGPT4o(reply, 'find_nearby');
+                      }
+                    } catch {}
+                    audioContent = await playTTS(styled, {
                       voice: process.env.TTS_VOICE || 'pl-PL-Chirp3-HD-Erinome',
                       tone: getSession(sessionId)?.tone || 'swobodny'
                     });
@@ -2607,10 +2609,12 @@ KONTEKST MIEJSCA:
           });
         } else {
           let styled = reply;
-          try { styled = await formatTTSReply(reply, intent || 'neutral'); } catch {}
-          const ssml = applySSMLStyling(styled, intent || 'neutral');
-          console.log('[TTS] SSML active for intent:', intent || 'neutral');
-          audioContent = await playTTS(ssml, { 
+          try {
+            if (process.env.OPENAI_MODEL) {
+              styled = await stylizeWithGPT4o(reply, intent || 'neutral');
+            }
+          } catch {}
+          audioContent = await playTTS(styled, { 
             voice: process.env.TTS_VOICE || 'pl-PL-Chirp3-HD-Erinome', 
             tone: currentSession?.tone || 'swobodny' 
           });
