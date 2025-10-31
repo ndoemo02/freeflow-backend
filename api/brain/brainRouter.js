@@ -1036,6 +1036,8 @@ export default async function handler(req, res) {
 
   try {
     console.log('[brainRouter] 🚀 Handler called');
+    const perf = { start: Date.now(), nluMs: 0, dbMs: 0, ttsMs: 0, durationMs: 0 };
+    const withDb = async (promise) => { const t = Date.now(); const out = await promise; perf.dbMs += (Date.now() - t); return out; };
     const __tStart = Date.now();
     let __nluMs = 0; let __tAfterNlu = 0; let __tBeforeTTS = 0; let __ttsMs = 0;
     
@@ -1112,7 +1114,9 @@ export default async function handler(req, res) {
     if (geoLocation) {
       console.log(`🧭 GeoContext Layer activated for: "${geoLocation}"${geoCuisineType ? ` (cuisine: ${geoCuisineType})` : ''}`);
       const session = getSession(sessionId);
+      const __dbGeo0 = Date.now();
       const geoRestaurants = await findRestaurantsByLocation(geoLocation, geoCuisineType, session);
+      perf.dbMs += (Date.now() - __dbGeo0);
 
       if (geoRestaurants?.length) {
         // Zapisz lokalizację i listę do sesji (dla follow-up: show_more_options/select_restaurant)
@@ -1173,6 +1177,7 @@ export default async function handler(req, res) {
     const __nlu0 = Date.now();
     const { intent: rawIntent, restaurant, parsedOrder, confidence: rawConfidence } = await detectIntent(text, currentSession);
     __nluMs = Date.now() - __nlu0;
+    perf.nluMs += __nluMs;
     __tAfterNlu = Date.now();
     
     // 🧠 [DEBUG] 2C: Intent flow logging - detectIntent result
@@ -1660,11 +1665,13 @@ export default async function handler(req, res) {
           const wantsMenu = /\b(menu|pokaz|pokaż)\b/i.test(String(text || ''));
           if (wantsMenu) {
             try {
-              const { data: menu } = await supabase
-                .from("menu_items_v2")
-                .select("id, name, price_pln, available, category")
-                .eq("restaurant_id", restaurant.id)
-                .order("name", { ascending: true });
+              const { data: menu } = await withDb(
+                supabase
+                  .from("menu_items_v2")
+                  .select("id, name, price_pln, available, category")
+                  .eq("restaurant_id", restaurant.id)
+                  .order("name", { ascending: true })
+              );
 
               const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
               const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
@@ -1696,11 +1703,13 @@ export default async function handler(req, res) {
               const sNow = getSession(sessionId) || {};
               const hasPending = !!(sNow?.pendingOrder && Array.isArray(sNow.pendingOrder.items) && sNow.pendingOrder.items.length);
               if (!hasPending) {
-                const { data: menu } = await supabase
-                  .from("menu_items_v2")
-                  .select("id, name, price_pln, available, category")
-                  .eq("restaurant_id", restaurant.id)
-                  .order("name", { ascending: true });
+                const { data: menu } = await withDb(
+                  supabase
+                    .from("menu_items_v2")
+                    .select("id, name, price_pln, available, category")
+                    .eq("restaurant_id", restaurant.id)
+                    .order("name", { ascending: true })
+                );
 
                 const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
                 const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
@@ -1781,11 +1790,13 @@ export default async function handler(req, res) {
         const wantsMenu = /\b(menu|pokaz|pokaż)\b/i.test(String(text || ''));
         if (wantsMenu) {
           try {
-            const { data: menu } = await supabase
-              .from("menu_items_v2")
-              .select("id, name, price_pln, available, category")
-              .eq("restaurant_id", chosen.id)
-              .order("name", { ascending: true });
+            const { data: menu } = await withDb(
+              supabase
+                .from("menu_items_v2")
+                .select("id, name, price_pln, available, category")
+                .eq("restaurant_id", chosen.id)
+                .order("name", { ascending: true })
+            );
 
             const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
             const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
@@ -1817,11 +1828,13 @@ export default async function handler(req, res) {
             const sNow = getSession(sessionId) || {};
             const hasPending = !!(sNow?.pendingOrder && Array.isArray(sNow.pendingOrder.items) && sNow.pendingOrder.items.length);
             if (!hasPending) {
-              const { data: menu } = await supabase
-                .from("menu_items_v2")
-                .select("id, name, price_pln, available, category")
-                .eq("restaurant_id", chosen.id)
-                .order("name", { ascending: true });
+              const { data: menu } = await withDb(
+                supabase
+                  .from("menu_items_v2")
+                  .select("id, name, price_pln, available, category")
+                  .eq("restaurant_id", chosen.id)
+                  .order("name", { ascending: true })
+              );
 
               const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
               const bannedNames = ['cappy', 'coca-cola', 'cola', 'fanta', 'sprite', 'pepsi', 'sos', 'dodat', 'napoj', 'napój'];
@@ -1904,12 +1917,14 @@ export default async function handler(req, res) {
         }
 
         // Pobierz menu z bazy
-        const { data: menu, error } = await supabase
-          .from("menu_items_v2")
-          .select("id, name, price_pln, available, category")
-          .eq("restaurant_id", current.id)
-          .eq("available", true)
-          .order("name", { ascending: true });
+        const { data: menu, error } = await withDb(
+          supabase
+            .from("menu_items_v2")
+            .select("id, name, price_pln, available, category")
+            .eq("restaurant_id", current.id)
+            .eq("available", true)
+            .order("name", { ascending: true })
+        );
 
         if (error) {
           console.error("⚠️ Supabase error in menu_request:", error?.message || "Brak danych");
@@ -1920,12 +1935,14 @@ export default async function handler(req, res) {
         if (!menu?.length) {
           console.warn(`⚠️ No menu items for restaurant: ${current.name}`);
           // Fallback bez filtra available=true
-          const { data: menuAny, error: menuAnyErr } = await supabase
-            .from("menu_items_v2")
-            .select("id, name, price_pln, available, category")
-            .eq("restaurant_id", current.id)
-            .order("name", { ascending: true })
-            .limit(12);
+          const { data: menuAny, error: menuAnyErr } = await withDb(
+            supabase
+              .from("menu_items_v2")
+              .select("id, name, price_pln, available, category")
+              .eq("restaurant_id", current.id)
+              .order("name", { ascending: true })
+              .limit(12)
+          );
 
           if (!menuAny?.length) {
             replyCore = `W bazie nie ma pozycji menu dla ${current.name}. Mogę:
@@ -2692,6 +2709,26 @@ KONTEKST MIEJSCA:
 
     const __durationMs = Date.now() - __tStart;
     const __dbMsApprox = Math.max(0, (__tBeforeTTS || Date.now()) - (__tAfterNlu || __tStart));
+    // consolidate perf
+    try {
+      perf.ttsMs += (__ttsMs || 0);
+      perf.durationMs = __durationMs;
+      perf.dbMs += (__dbMsApprox || 0);
+      if (process.env.ENABLE_INTENT_LOGS === 'true') {
+        // fire-and-forget, do not block response
+        supabase.from('amber_intents').insert({
+          timestamp: new Date().toISOString(),
+          intent,
+          confidence,
+          fallback,
+          durationMs: perf.durationMs,
+          ttsMs: perf.ttsMs,
+          nluMs: perf.nluMs,
+          dbMs: perf.dbMs,
+          replySnippet: String(reply || '').slice(0, 160),
+        }).then(() => {}).catch(() => {});
+      }
+    } catch {}
 
     return res.status(200).json({
       ok: true,
@@ -2704,7 +2741,7 @@ KONTEKST MIEJSCA:
       audioEncoding: audioContent ? 'MP3' : null,
       context: getSession(sessionId),
       meta,
-      timings: { nluMs: __nluMs, dbMs: __dbMsApprox, ttsMs: __ttsMs, durationMs: __durationMs },
+      timings: { nluMs: perf.nluMs || __nluMs, dbMs: perf.dbMs || __dbMsApprox, ttsMs: perf.ttsMs || __ttsMs, durationMs: perf.durationMs || __durationMs },
       // dla testów: wystaw parsed_order także na top-level jeśli dostępne w meta
       parsed_order: meta?.parsed_order,
       timestamp: new Date().toISOString(),
