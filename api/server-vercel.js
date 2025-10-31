@@ -223,6 +223,43 @@ app.get('/api/admin/intents/export', async (req, res) => {
   catch (err) { res.status(500).send('error: ' + err.message); }
 });
 
+// Orders stats (KPI) — prefers RPC get_order_stats, falls back to aggregations
+app.get('/api/admin/orders/stats', async (req, res) => {
+  try {
+    // Try RPC first
+    try {
+      const { data, error } = await supabase.rpc('get_order_stats');
+      if (!error && data) return res.status(200).json({ ok: true, stats: data });
+    } catch {}
+
+    // Fallback: compute with aggregations (snake_case friendly)
+    let totalOrders = 0;
+    try {
+      const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true });
+      totalOrders = count || 0;
+    } catch {}
+
+    let totalRevenue = 0;
+    try {
+      // Prefer total_price, then total_cents/100
+      const { data: sumPrice } = await supabase.from('orders').select('sum:total_price');
+      if (Array.isArray(sumPrice) && sumPrice[0] && typeof sumPrice[0].sum === 'number') {
+        totalRevenue = sumPrice[0].sum;
+      } else {
+        const { data: sumCents } = await supabase.from('orders').select('sum:total_cents');
+        if (Array.isArray(sumCents) && sumCents[0] && sumCents[0].sum != null) {
+          const v = Number(sumCents[0].sum);
+          if (!isNaN(v)) totalRevenue = v / 100;
+        }
+      }
+    } catch {}
+
+    return res.status(200).json({ ok: true, stats: { total_orders: totalOrders, total_revenue: totalRevenue } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // --- Amber Control Deck endpoints ---
 app.get('/api/admin/config', async (req, res) => {
   try { const mod = await import('./admin/config.js'); return mod.default(req, res); }
@@ -253,6 +290,48 @@ app.get('/api/admin/debug', async (req, res) => {
 app.post('/api/hooks/amber-intent', async (req, res) => {
   try { const mod = await import('./hooks/amber-intent.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// --- SSE: Amber live metrics (latest NLU/DB/TTS)
+app.get('/api/amber/live', async (req, res) => {
+  try {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    const push = async () => {
+      if (closed) return;
+      try {
+        const { data } = await supabase
+          .from('amber_intents')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (data && data[0]) {
+          const r = data[0];
+          const payload = {
+            intent: r.intent,
+            nlu_ms: r.nlu_ms ?? r.nluMs ?? 0,
+            db_ms: r.db_ms ?? r.dbMs ?? 0,
+            tts_ms: r.tts_ms ?? r.ttsMs ?? 0,
+            duration_ms: r.duration_ms ?? r.durationMs ?? 0,
+            created_at: r.created_at || r.timestamp
+          };
+          res.write(`data: ${JSON.stringify(payload)}\n\n`);
+        }
+      } catch {}
+    };
+
+    const timer = setInterval(push, 2000);
+    push();
+    req.on('close', () => clearInterval(timer));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // Brain stats (lekki endpoint do testów)
