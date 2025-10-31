@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import { createClient } from '@supabase/supabase-js';
+import { verifyAmberAdmin } from './middleware/verifyAmberAdmin.js';
 
 // --- App setup ---
 const app = express();
@@ -118,6 +119,8 @@ app.post("/api/brain/router", async (req, res) => {
 });
 
 // === ADMIN ENDPOINTS ===
+// Protect all /api/admin routes
+app.use('/api/admin', verifyAmberAdmin);
 app.get('/api/admin/users-count', async (req, res) => {
   try {
     const mod = await import('./admin/users-count.js');
