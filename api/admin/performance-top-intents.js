@@ -10,12 +10,18 @@ export default async function handler(req, res) {
     if (!token || token !== process.env.ADMIN_TOKEN) return forbid(res);
 
     const daysBack = parseInt(req.query.days || '7', 10);
-    const sinceIso = new Date(Date.now() - daysBack * 24 * 3600 * 1000).toISOString();
+    const from = req.query.from;
+    const to = req.query.to;
+    const filterIntent = req.query.intent; // opcjonalny pojedynczy intent
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('amber_intents')
-      .select('intent,duration_ms,durationMs,created_at')
-      .gte('created_at', sinceIso);
+      .select('intent,duration_ms,durationMs,created_at');
+    if (from) query = query.gte('created_at', from); else query = query.gte('created_at', new Date(Date.now() - daysBack * 24 * 3600 * 1000).toISOString());
+    if (to) query = query.lte('created_at', to);
+    if (filterIntent) query = query.eq('intent', filterIntent);
+
+    const { data, error } = await query;
     if (error) throw error;
 
     const buckets = new Map();

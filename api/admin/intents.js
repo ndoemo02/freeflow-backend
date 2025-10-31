@@ -9,14 +9,23 @@ export default async function handler(req, res) {
     const token = req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || req.headers['x-Admin-Token'];
     if (!token || token !== process.env.ADMIN_TOKEN) return forbid(res);
 
+    const { from, to, intent } = req.query || {};
+    const limit = Math.min(parseInt(req.query.limit || '500', 10), 2000);
+
     // Spróbuj pobrać z tabeli amber_intents (jeśli istnieje)
     let list = [];
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('amber_intents')
         .select('created_at,intent,confidence,fallback,duration_ms,reply,tts_ms,nlu_ms,db_ms,restaurant_id')
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(limit);
+
+      if (from) query = query.gte('created_at', from);
+      if (to) query = query.lte('created_at', to);
+      if (intent) query = query.eq('intent', intent);
+
+      const { data, error } = await query;
       if (!error && Array.isArray(data)) {
         list = data.map(r => ({
           timestamp: r.created_at,
