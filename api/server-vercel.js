@@ -179,6 +179,16 @@ app.get('/api/admin/performance', async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.get('/api/admin/performance/trends', async (req, res) => {
+  try { const mod = await import('./admin/performance-trends.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/performance/top-intents', async (req, res) => {
+  try { const mod = await import('./admin/performance-top-intents.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.post('/api/admin/cache/clear', async (req, res) => {
   try { const mod = await import('./admin/cache-clear.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -203,6 +213,11 @@ app.get('/api/logs', async (req, res) => {
     const mod = await import('./logs.js');
     return mod.default(req, res);
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/intents/export', async (req, res) => {
+  try { const mod = await import('./admin/intents-export.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).send('error: ' + err.message); }
 });
 
 // Brain stats (lekki endpoint do testów)
