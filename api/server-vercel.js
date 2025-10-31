@@ -220,6 +220,28 @@ app.get('/api/admin/intents/export', async (req, res) => {
   catch (err) { res.status(500).send('error: ' + err.message); }
 });
 
+// --- Amber Control Deck endpoints ---
+app.get('/api/admin/config', async (req, res) => {
+  try { const mod = await import('./admin/config.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/admin/config', async (req, res) => {
+  try { const mod = await import('./admin/config.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.get('/api/admin/live', async (req, res) => {
+  try { const mod = await import('./admin/live.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message, data: [] }); }
+});
+app.get('/api/admin/prompt', async (req, res) => {
+  try { const mod = await import('./admin/prompt.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/admin/prompt', async (req, res) => {
+  try { const mod = await import('./admin/prompt.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Brain stats (lekki endpoint do testów)
 app.get('/api/brain/stats', async (req, res) => {
   try {
