@@ -231,6 +231,16 @@ app.get('/api/admin/amber/export', async (req, res) => {
   catch (err) { res.status(500).send('error: ' + err.message); }
 });
 
+// === FREEFUN ENDPOINTS ===
+app.get('/api/freefun/list', async (req, res) => {
+  try { const mod = await import('./freefun/list.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/freefun/add', verifyAmberAdmin, async (req, res) => {
+  try { const mod = await import('./freefun/add.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Orders stats (KPI) — prefers RPC get_order_stats, falls back to aggregations
 app.get('/api/admin/orders/stats', async (req, res) => {
   try {

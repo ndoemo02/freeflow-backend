@@ -1631,6 +1631,40 @@ export default async function handler(req, res) {
         break;
       }
 
+      case "find_event_nearby":
+      case "find_free_event":
+      case "recommend_activity": {
+        console.log('🧠 freefun intent detected');
+        try {
+          const cityFromText = extractLocation(text);
+          const sess = getSession(sessionId) || {};
+          const city = cityFromText || sess.last_location || '';
+          const nowIso = new Date().toISOString();
+          let q = supabase
+            .from('freefun_events')
+            .select('title,date,city,description,link')
+            .gte('date', nowIso)
+            .order('date', { ascending: true })
+            .limit(3);
+          if (city) q = q.ilike('city', `%${city}%`);
+          const { data: events, error: evErr } = await q;
+          if (evErr) throw evErr;
+          if (Array.isArray(events) && events.length) {
+            const first = events[0];
+            replyCore = city
+              ? `W ${city} znalazłam ${events.length} wydarzenia, np. ${first.title} (${String(first.date).slice(0,10)}).`
+              : `Znalazłam ${events.length} wydarzenia, np. ${first.title} w ${first.city}.`;
+            meta.events = events;
+          } else {
+            replyCore = city ? `Nie znalazłam aktualnych wydarzeń w ${city}.` : 'Nie znalazłam aktualnych wydarzeń w pobliżu.';
+          }
+        } catch (e) {
+          console.warn('freefun error:', e?.message);
+          replyCore = 'Nie mogę teraz pobrać wydarzeń, spróbuj proszę później.';
+        }
+        break;
+      }
+
       case "show_more_options": {
         console.log('🧠 show_more_options intent detected');
         const s = getSession(sessionId) || {};
