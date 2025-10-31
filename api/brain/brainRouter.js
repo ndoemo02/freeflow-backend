@@ -2714,7 +2714,7 @@ KONTEKST MIEJSCA:
       perf.ttsMs += (__ttsMs || 0);
       perf.durationMs = __durationMs;
       perf.dbMs += (__dbMsApprox || 0);
-      if (process.env.ENABLE_INTENT_LOGS === 'true') {
+      if (process.env.ENABLE_INTENT_LOGS === 'true' && process.env.NODE_ENV !== 'test') {
         // fire-and-forget, do not block response
         supabase.from('amber_intents').insert({
           timestamp: new Date().toISOString(),
