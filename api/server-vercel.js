@@ -273,6 +273,16 @@ app.get('/api/admin/business/stats', async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.post('/api/admin/trends/analyze', async (req, res) => {
+  try { const mod = await import('./admin/trends-analyze.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/trends/alerts', async (req, res) => {
+  try { const mod = await import('./admin/trends-alerts.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // --- Amber Control Deck endpoints ---
 app.get('/api/admin/config', async (req, res) => {
   try { const mod = await import('./admin/config.js'); return mod.default(req, res); }
@@ -438,4 +448,5 @@ app.use((req, res) => {
 
 // --- KeepAlive (prod only) ---
 import "./utils/keepAlive.js";
+import "./utils/trendsCron.js";
 
