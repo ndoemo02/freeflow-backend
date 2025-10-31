@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     const limit = Math.min(parseInt(req.query.limit || '10', 10), 100);
     const { data, error } = await supabase
       .from('amber_intents')
-      .select('created_at,timestamp,intent,confidence,fallback,duration_ms,durationMs,reply,replySnippet')
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;

@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await supabase
       .from('amber_intents')
-      .select('created_at,timestamp,intent,confidence,fallback,duration_ms,tts_ms,nlu_ms,db_ms,durationMs,ttsMs,nluMs,dbMs,restaurant_id,reply')
+      .select('*')
       .gte('created_at', sinceIso)
       .order('created_at', { ascending: false })
       .limit(limit);

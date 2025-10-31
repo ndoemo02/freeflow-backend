@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
     let query = supabase
       .from('amber_intents')
-      .select('created_at,timestamp,nlu_ms,db_ms,tts_ms,duration_ms,nluMs,dbMs,ttsMs,durationMs');
+      .select('*');
     if (from) query = query.gte('created_at', from); else query = query.gte('created_at', new Date(Date.now() - daysBack * 24 * 3600 * 1000).toISOString());
     if (to) query = query.lte('created_at', to);
     if (intent) query = query.eq('intent', intent);

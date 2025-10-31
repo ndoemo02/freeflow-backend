@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
     let query = supabase
       .from('amber_intents')
-      .select('intent,duration_ms,durationMs,created_at');
+      .select('*');
     if (from) query = query.gte('created_at', from); else query = query.gte('created_at', new Date(Date.now() - daysBack * 24 * 3600 * 1000).toISOString());
     if (to) query = query.lte('created_at', to);
     if (filterIntent) query = query.eq('intent', filterIntent);
