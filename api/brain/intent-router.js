@@ -139,6 +139,15 @@ const NAME_ALIASES = {
   'placków': 'placki ziemniaczane',
   'frytki': 'frytki belgijskie',
   'frytek': 'frytki belgijskie',
+
+  // Specjalny wyjątek: Głodzilla (Klaps Burgers) — łap także przekręcenia „godzilla”
+  'głodzilla': 'głodzilla',
+  'glodzilla': 'głodzilla',
+  'godzilla': 'głodzilla',
+  // krótsze rdzenie, aby złapać odmiany (np. „głodzillę”, „godzilli”, „glodzille”)
+  'głodzil': 'głodzilla',
+  'glodzil': 'głodzilla',
+  'godzil': 'głodzilla',
 };
 
 export function applyAliases(text) {
