@@ -162,6 +162,10 @@ app.get('/api/admin/restaurants', async (req, res) => {
     return mod.default(req, res);
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+app.get('/api/admin/amber/restaurants-activity', async (req, res) => {
+  try { const mod = await import('./admin/amber-restaurants-activity.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 
 app.get('/api/admin/menu', async (req, res) => {
   try {
@@ -262,6 +266,11 @@ app.get('/api/admin/orders/stats', async (req, res) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+app.get('/api/admin/business/stats', async (req, res) => {
+  try { const mod = await import('./admin/business-stats.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
 // --- Amber Control Deck endpoints ---

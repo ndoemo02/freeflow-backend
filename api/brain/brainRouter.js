@@ -2723,6 +2723,8 @@ KONTEKST MIEJSCA:
         const ttsVal = Number(perf.ttsMs || __ttsMs || 0);
         const durVal = Number(perf.durationMs || __durationMs || 0);
         const fbVal = typeof fallback === 'boolean' ? fallback : (intentName === 'none');
+        const restId = (finalRestaurant && finalRestaurant.id) || (currentSession && currentSession.lastRestaurant && currentSession.lastRestaurant.id) || null;
+        const ordId = (meta && (meta.order_id || meta.orderId)) || null;
 
         supabase.from('amber_intents').insert({
           intent: intentName || 'unknown',
@@ -2734,6 +2736,8 @@ KONTEKST MIEJSCA:
           tts_ms: ttsVal,
           duration_ms: durVal,
           created_at: new Date().toISOString(),
+          restaurant_id: restId,
+          order_id: ordId,
         }).then(() => {}).catch(async (e1) => {
           try {
             await supabase.from('amber_intents').insert({
@@ -2746,6 +2750,8 @@ KONTEKST MIEJSCA:
               dbMs: dbVal,
               ttsMs: ttsVal,
               durationMs: durVal,
+              restaurantId: restId,
+              orderId: ordId,
             });
           } catch (e2) {
             console.error('❌ amber_intents insert failed:', e2.message);
