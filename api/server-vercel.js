@@ -249,6 +249,12 @@ app.get('/api/admin/debug', async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// --- Hooks ---
+app.post('/api/hooks/amber-intent', async (req, res) => {
+  try { const mod = await import('./hooks/amber-intent.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // Brain stats (lekki endpoint do testów)
 app.get('/api/brain/stats', async (req, res) => {
   try {
