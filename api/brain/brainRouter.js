@@ -2715,18 +2715,42 @@ KONTEKST MIEJSCA:
       perf.durationMs = __durationMs;
       perf.dbMs += (__dbMsApprox || 0);
       if (process.env.ENABLE_INTENT_LOGS === 'true' && process.env.NODE_ENV !== 'test') {
-        // fire-and-forget, do not block response
+        // fire-and-forget, try snake_case schema first, then camelCase fallback
+        const intentName = intent;
+        const replySnippet = String(reply || '').slice(0, 120);
+        const nluVal = Number(perf.nluMs || __nluMs || 0);
+        const dbVal = Number(perf.dbMs || __dbMsApprox || 0);
+        const ttsVal = Number(perf.ttsMs || __ttsMs || 0);
+        const durVal = Number(perf.durationMs || __durationMs || 0);
+        const fbVal = typeof fallback === 'boolean' ? fallback : (intentName === 'none');
+
         supabase.from('amber_intents').insert({
-          timestamp: new Date().toISOString(),
-          intent,
-          confidence,
-          fallback,
-          durationMs: perf.durationMs,
-          ttsMs: perf.ttsMs,
-          nluMs: perf.nluMs,
-          dbMs: perf.dbMs,
-          replySnippet: String(reply || '').slice(0, 160),
-        }).then(() => {}).catch(() => {});
+          intent: intentName || 'unknown',
+          confidence: Number(confidence || 0),
+          fallback: fbVal,
+          reply_snippet: replySnippet,
+          nlu_ms: nluVal,
+          db_ms: dbVal,
+          tts_ms: ttsVal,
+          duration_ms: durVal,
+          created_at: new Date().toISOString(),
+        }).then(() => {}).catch(async (e1) => {
+          try {
+            await supabase.from('amber_intents').insert({
+              timestamp: new Date().toISOString(),
+              intent: intentName,
+              confidence: Number(confidence || 0),
+              fallback: fbVal,
+              replySnippet,
+              nluMs: nluVal,
+              dbMs: dbVal,
+              ttsMs: ttsVal,
+              durationMs: durVal,
+            });
+          } catch (e2) {
+            console.error('❌ amber_intents insert failed:', e2.message);
+          }
+        });
       }
     } catch {}
 
