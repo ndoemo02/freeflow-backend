@@ -15,6 +15,11 @@ let openaiClient = null;
 const ttsCache = new Map();
 // Cache dla krótkiej stylizacji GPT-4o (max 20 wpisów)
 const stylizeCache = new Map();
+
+export function clearTtsCaches() {
+  try { ttsCache.clear(); } catch {}
+  try { stylizeCache.clear(); } catch {}
+}
 function getOpenAI() {
   if (openaiClient) return openaiClient;
   const apiKey = process.env.OPENAI_API_KEY || '';

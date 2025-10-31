@@ -1036,6 +1036,8 @@ export default async function handler(req, res) {
 
   try {
     console.log('[brainRouter] 🚀 Handler called');
+    const __tStart = Date.now();
+    let __nluMs = 0; let __tAfterNlu = 0; let __tBeforeTTS = 0; let __ttsMs = 0;
     
     // Globalny fallback - sprawdź credentials Supabase
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -1168,7 +1170,10 @@ export default async function handler(req, res) {
     }
     let forcedIntent = null;
 
+    const __nlu0 = Date.now();
     const { intent: rawIntent, restaurant, parsedOrder, confidence: rawConfidence } = await detectIntent(text, currentSession);
+    __nluMs = Date.now() - __nlu0;
+    __tAfterNlu = Date.now();
     
     // 🧠 [DEBUG] 2C: Intent flow logging - detectIntent result
     console.log('🧠 [DEBUG] detectIntent result:', {
@@ -2620,6 +2625,7 @@ KONTEKST MIEJSCA:
     if (includeTTS && reply && process.env.NODE_ENV !== 'test') {
       try {
         console.log('🎤 Generating TTS for reply...');
+        __tBeforeTTS = Date.now();
         const SIMPLE_TTS = process.env.TTS_SIMPLE === 'true' || process.env.TTS_MODE === 'basic';
         if (SIMPLE_TTS) {
           audioContent = await playTTS(reply, { 
@@ -2644,6 +2650,7 @@ KONTEKST MIEJSCA:
           });
         }
         console.log('✅ TTS audio generated successfully');
+        __ttsMs = Date.now() - __tBeforeTTS;
       } catch (err) {
         console.error('❌ TTS generation failed:', err.message);
         // Nie przerywaj - kontynuuj bez audio
@@ -2683,6 +2690,9 @@ KONTEKST MIEJSCA:
     }
     // ===== PATCH: enrich reply (END) =====
 
+    const __durationMs = Date.now() - __tStart;
+    const __dbMsApprox = Math.max(0, (__tBeforeTTS || Date.now()) - (__tAfterNlu || __tStart));
+
     return res.status(200).json({
       ok: true,
       intent,
@@ -2694,6 +2704,7 @@ KONTEKST MIEJSCA:
       audioEncoding: audioContent ? 'MP3' : null,
       context: getSession(sessionId),
       meta,
+      timings: { nluMs: __nluMs, dbMs: __dbMsApprox, ttsMs: __ttsMs, durationMs: __durationMs },
       // dla testów: wystaw parsed_order także na top-level jeśli dostępne w meta
       parsed_order: meta?.parsed_order,
       timestamp: new Date().toISOString(),

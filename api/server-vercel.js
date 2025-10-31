@@ -146,6 +146,57 @@ app.patch('/api/admin/tts', async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+app.get('/api/admin/intents', async (req, res) => {
+  try {
+    const mod = await import('./admin/intents.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/restaurants', async (req, res) => {
+  try {
+    const mod = await import('./admin/restaurants.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/menu', async (req, res) => {
+  try {
+    const mod = await import('./admin/menu.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/admin/menu', async (req, res) => {
+  try {
+    const mod = await import('./admin/menu.js');
+    return mod.default(req, res);
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/performance', async (req, res) => {
+  try { const mod = await import('./admin/performance.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.post('/api/admin/cache/clear', async (req, res) => {
+  try { const mod = await import('./admin/cache-clear.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.patch('/api/admin/restaurants/:id', async (req, res) => {
+  try {
+    const token = req.headers['x-admin-token'] || req.headers['X-Admin-Token'] || req.headers['x-Admin-Token'];
+    if (!token || token !== process.env.ADMIN_TOKEN) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const { supabase } = await import('./_supabase.js');
+    const id = req.params.id;
+    const body = req.body || {};
+    const { data, error } = await supabase.from('restaurants').update({ is_active: !!body.is_active }).eq('id', id).select('id,is_active').limit(1);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.status(200).json({ ok: true, data: Array.isArray(data) ? data[0] : data });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // === LOGS ===
 app.get('/api/logs', async (req, res) => {
   try {
