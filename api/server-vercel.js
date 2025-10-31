@@ -244,6 +244,10 @@ app.post('/api/admin/prompt', async (req, res) => {
   try { const mod = await import('./admin/prompt.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+app.get('/api/admin/debug', async (req, res) => {
+  try { const mod = await import('./admin/debug.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 
 // Brain stats (lekki endpoint do testów)
 app.get('/api/brain/stats', async (req, res) => {
