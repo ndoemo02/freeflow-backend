@@ -174,6 +174,10 @@ app.get('/api/admin/amber/restaurants-activity', async (req, res) => {
   try { const mod = await import('./admin/amber-restaurants-activity.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+app.get('/api/admin/amber/learning-stats', async (req, res) => {
+  try { const mod = await import('./admin/amber-learning-stats.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 
 app.get('/api/admin/menu', async (req, res) => {
   try {
