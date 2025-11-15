@@ -3,6 +3,7 @@ import { applyCORS } from './_cors.js';
 import { getVertexAccessToken } from '../utils/googleAuth.js';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { getConfig } from "./config/configService.js";
 
 // Global Supabase client (avoid per-call instantiation)
 export const supabase = createClient(
@@ -108,7 +109,14 @@ export async function stylizeWithGPT4o(rawText, intent = 'neutral') {
     if (!openai) return rawText;
     const key = `${rawText}|${intent}`;
     if (stylizeCache.has(key)) return stylizeCache.get(key);
-    const system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania), ciepły lokalny ton, lekko dowcipny. Nie używaj list, numeracji ani nawiasów. Nie dodawaj informacji, nie używaj znaczników i SSML. Intencja: ${intent}.`;
+    let system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania), ciepły lokalny ton, lekko dowcipny. Nie używaj list, numeracji ani nawiasów. Nie dodawaj informacji, nie używaj znaczników i SSML. Intencja: ${intent}.`;
+    // Jeśli admin ustawił własny prompt w system_config → użyj go zamiast domyślnego
+    try {
+      const cfg = await getConfig();
+      if (cfg?.amber_prompt && typeof cfg.amber_prompt === "string" && cfg.amber_prompt.trim().length > 0) {
+        system = cfg.amber_prompt;
+      }
+    } catch {}
     let out = '';
     if (process.env.OPENAI_STREAM === 'true') {
       const completion = await openai.chat.completions.create({
@@ -149,11 +157,22 @@ export async function stylizeWithGPT4o(rawText, intent = 'neutral') {
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {
-    const { voice = process.env.TTS_VOICE || "pl-PL-Wavenet-A", tone = "swobodny" } = options;
-    const SIMPLE = process.env.TTS_SIMPLE === 'true' || process.env.TTS_MODE === 'basic';
-    const USE_VERTEX = process.env.TTS_USE_VERTEX !== 'false';
-    const USE_LINEAR16 = process.env.TTS_LINEAR16 === 'true'; // eksperymentalnie (lokalnie)
-    const isChirpHD = /Chirp3-HD/i.test(String(voice));
+    const { tone = "swobodny" } = options;
+
+    // 🔧 Dynamiczne ustawienia TTS z system_config
+    let cfg;
+    try {
+      cfg = await getConfig();
+    } catch {}
+
+    const engineRaw = (cfg?.tts_engine?.engine || process.env.TTS_MODE || "vertex").toLowerCase();
+    const voiceCfg = cfg?.tts_voice?.voice || process.env.TTS_VOICE || "pl-PL-Wavenet-A";
+    const voice = options.voice || voiceCfg;
+
+    const SIMPLE = engineRaw === "basic" || engineRaw === "wavenet";
+    const USE_VERTEX = engineRaw === "vertex" || engineRaw === "chirp" || process.env.TTS_USE_VERTEX !== "false";
+    const USE_LINEAR16 = process.env.TTS_LINEAR16 === "true"; // eksperymentalnie (lokalnie)
+    const isChirpHD = engineRaw === "chirp" || /Chirp3-HD/i.test(String(voice));
     const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
     const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
 
