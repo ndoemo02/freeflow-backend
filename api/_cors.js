@@ -32,7 +32,8 @@ export function applyCORS(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  // Allow PATCH/DELETE so Panel Klienta może aktualizować / anulować zamówienia
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", ALLOWED_HEADERS);
 
   if (req.method === "OPTIONS") {

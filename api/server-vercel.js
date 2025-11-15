@@ -22,9 +22,17 @@ const CORS_ORIGINS_DEV = [
 const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production'
   ? CORS_ORIGINS_PROD
   : [...CORS_ORIGINS_PROD, ...CORS_ORIGINS_DEV];
-app.use(cors({ origin: ALLOWED_ORIGINS, methods: ['GET','POST','OPTIONS'], credentials: true }));
-// Express 5: '*' nie jest wspierane przez path-to-regexp; użyj wyrażenia regularnego lub usuń preflight handler
-app.options(/.*/, cors({ origin: ALLOWED_ORIGINS }));
+// Pozwól także na PATCH/DELETE, żeby Panel Klienta mógł aktualizować / anulować zamówienia
+app.use(cors({
+  origin: ALLOWED_ORIGINS,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  credentials: true,
+}));
+// Express 5: preflight dla wszystkich ścieżek – z tym samym zestawem metod
+app.options(/.*/, cors({
+  origin: ALLOWED_ORIGINS,
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+}));
 app.use(morgan('tiny'));
 
 // --- Env sanity ---
@@ -313,6 +321,35 @@ app.get('/api/admin/prompt', async (req, res) => {
 app.post('/api/admin/prompt', async (req, res) => {
   try { const mod = await import('./admin/prompt.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// --- Diagnostic test endpoints (Supabase / config visibility) ---
+app.get('/api/admin/test/config', async (req, res) => {
+  try {
+    const mod = await import('./config/configService.js');
+    const cfg = await mod.getConfig();
+    return res.status(200).json({
+      ok: true,
+      config: cfg,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/admin/test/prompt', async (req, res) => {
+  try {
+    const mod = await import('./config/configService.js');
+    const prompt = await mod.getPrompt();
+    return res.status(200).json({
+      ok: true,
+      length: typeof prompt === 'string' ? prompt.length : 0,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
 });
 app.get('/api/admin/debug', async (req, res) => {
   try { const mod = await import('./admin/debug.js'); return mod.default(req, res); }

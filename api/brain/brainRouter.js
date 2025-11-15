@@ -1,14 +1,13 @@
 // /api/brain/brainRouter.js
 import { detectIntent, normalizeTxt } from "./intent-router.js";
 import { supabase } from "../_supabase.js";
+import { getConfig } from "../config/configService.js";
 import { getSession, updateSession } from "./context.js";
 import { playTTS, stylizeWithGPT4o } from "../tts.js";
 import crypto from "node:crypto";
 import { extractLocation } from "./helpers.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-// Model można nadpisać przez ENV: OPENAI_MODEL
-const MODEL = process.env.OPENAI_MODEL || "gpt-5";
 const IS_TEST = !!(process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test');
 
 // 🧹 Clear session cache on server start
@@ -50,6 +49,33 @@ function commitPendingOrder(session) {
   return { committed: true, cart: session.cart };
 }
 // ===== PATCH: cart utils (END) =====
+
+function applyDynamicTtsEnv(cfg) {
+  try {
+    if (!cfg) return;
+    if (cfg.tts_engine?.engine) {
+      // Map logical engine to existing env toggles
+      const engine = String(cfg.tts_engine.engine);
+      process.env.TTS_MODE = engine;
+      process.env.TTS_SIMPLE = engine === "basic" ? "true" : "false";
+      // vertex / chirp use Vertex by default
+      const useVertex = engine === "vertex" || engine === "chirp" || engine === "vertex-tts";
+      process.env.TTS_USE_VERTEX = useVertex ? "true" : "false";
+    }
+    if (cfg.tts_voice?.voice) {
+      process.env.TTS_VOICE = String(cfg.tts_voice.voice);
+    }
+    if (cfg.streaming && typeof cfg.streaming.enabled === "boolean") {
+      process.env.OPENAI_STREAM = cfg.streaming.enabled ? "true" : "false";
+    }
+    if (typeof cfg.cache_enabled === "boolean") {
+      process.env.CACHE_ENABLED = cfg.cache_enabled ? "true" : "false";
+    }
+  } catch (e) {
+    console.warn("⚠️ applyDynamicTtsEnv failed:", e.message);
+  }
+}
+
 // --- Validation Functions ---
 
 /**
@@ -1052,6 +1078,10 @@ export default async function handler(req, res) {
 
     const body = await req.json?.() || req.body || {};
     const { sessionId = "default", text } = body;
+
+    // 🔧 Dynamic config (per interaction)
+    const cfg = await getConfig().catch(() => null);
+    applyDynamicTtsEnv(cfg);
     
     // 🔍 VALIDATION: Sprawdź input
     const inputValidation = validateInput(text);
@@ -2552,6 +2582,9 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
 
     // 🔹 Krok 4: Generacja odpowiedzi Amber (stylistyczna)
     let reply = replyCore;
+
+    const modelName = cfg?.model?.name || process.env.OPENAI_MODEL || "gpt-5";
+
     // Kontrola użycia GPT przez ENV: AMBER_USE_GPT (domyślnie: true)
     const USE_GPT = false;
     if (!IS_TEST && USE_GPT && process.env.OPENAI_API_KEY) {
@@ -2563,7 +2596,7 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
         },
         // ⬇️ dodaj timeout i parametry zwiększające szansę na pełny zwrot
         body: JSON.stringify({
-          model: MODEL,
+          model: modelName,
           temperature: 0.7,
           max_tokens: 300, // zwiększ limity generacji
           presence_penalty: 0.2,
