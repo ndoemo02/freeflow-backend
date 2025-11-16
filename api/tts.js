@@ -24,7 +24,11 @@ async function playGeminiTTS(text, { voice, pitch, speakingRate }) {
     process.env.GOOGLE_PROJECT_ID ||
     process.env.GCLOUD_PROJECT ||
     process.env.GCP_PROJECT;
-  const location = process.env.GOOGLE_VERTEX_LOCATION || "europe-west1";
+  // Generative modele Gemini zwykle działają w lokalizacji "global"
+  const location =
+    process.env.GEMINI_TTS_LOCATION ||
+    process.env.GOOGLE_VERTEX_LOCATION ||
+    "global";
   const model = process.env.GEMINI_TTS_MODEL || "gemini-2.5-pro-tts";
 
   if (!projectId) {
