@@ -42,13 +42,18 @@ async function playGeminiTTS(text, { voice, pitch, speakingRate }) {
     ],
     generationConfig: {
       responseMimeType: "audio/mp3",
-      // Polskie dialogi, ale głos wybierany po nazwie (Zephyr / Achernar / Aoede / Erinome)
-      speechConfig: {
-        voice: voice || "zephyr",
-        languageCode: "pl-PL",
-        pitch,
-        speakingRate,
+    },
+    // Konfiguracja mowy zgodna z API Gemini (voiceConfig + speakingRate/pitch)
+    speechConfig: {
+      voiceConfig: {
+        // Nazwy zgodne z UI: zephyr / achernar / aoede / erinome
+        // Jeśli backend dostanie pełne ID, po prostu je przekaże.
+        name: voice || "zephyr",
       },
+      languageCode: "pl-PL",
+      speakingRate: typeof speakingRate === "number" ? speakingRate : 1.0,
+      pitch: typeof pitch === "number" ? pitch : 0.0,
+      volumeGainDb: 0.0,
     },
   };
 
