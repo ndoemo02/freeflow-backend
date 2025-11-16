@@ -11,6 +11,7 @@ const KEYS = [
   "streaming",
   "cache_enabled",
   "amber_prompt",
+  "speech_style",
 ]
 
 const DEFAULT_CONFIG = {
@@ -20,6 +21,7 @@ const DEFAULT_CONFIG = {
   streaming: { enabled: true },
   cache_enabled: true,
   amber_prompt: "",
+  speech_style: "standard",
 }
 
 function safeMerge(base, value) {
@@ -61,6 +63,10 @@ export async function getConfig() {
           ? map.cache_enabled
           : DEFAULT_CONFIG.cache_enabled,
       amber_prompt: normalizePrompt(map.amber_prompt, DEFAULT_CONFIG.amber_prompt),
+      speech_style:
+        typeof map.speech_style === "string" && map.speech_style.trim().length > 0
+          ? map.speech_style
+          : DEFAULT_CONFIG.speech_style,
     }
 
     return cfg

@@ -110,11 +110,20 @@ export async function stylizeWithGPT4o(rawText, intent = 'neutral') {
     const key = `${rawText}|${intent}`;
     if (stylizeCache.has(key)) return stylizeCache.get(key);
     let system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania), ciepły lokalny ton, lekko dowcipny. Nie używaj list, numeracji ani nawiasów. Nie dodawaj informacji, nie używaj znaczników i SSML. Intencja: ${intent}.`;
-    // Jeśli admin ustawił własny prompt w system_config → użyj go zamiast domyślnego
+
+    // Dynamiczne prompty / styl mowy
     try {
       const cfg = await getConfig();
+      const style = (cfg?.speech_style || 'standard').toLowerCase();
+
       if (cfg?.amber_prompt && typeof cfg.amber_prompt === "string" && cfg.amber_prompt.trim().length > 0) {
+        // Jeśli admin podał własny system prompt – użyj go 1:1
         system = cfg.amber_prompt;
+      } else if (style === 'silesian' || style === 'śląska' || style === 'slask') {
+        system = `Jesteś Amber – głosem FreeFlow. Przekształć surowy tekst w krótką, naturalną wypowiedź (max 2 zdania).
+Mów przyjaźnie i jasno, ale używaj śląskiej gwary (gōdka) – lekkiej i zrozumiałej dla osób spoza regionu.
+Unikaj bardzo rzadkich słów, nie przesadzaj z gwarą, tylko dodaj lokalny klimat (np. „joch”, „kaj”, „po naszymu”).
+Nie zmieniaj faktów ani liczb. Intencja użytkownika: "${intent}".`;
       }
     } catch {}
     let out = '';
