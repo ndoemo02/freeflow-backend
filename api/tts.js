@@ -17,6 +17,70 @@ const ttsCache = new Map();
 // Cache dla krótkiej stylizacji GPT-4o (max 20 wpisów)
 const stylizeCache = new Map();
 
+// --- Gemini TTS helper (experimental) ---
+async function playGeminiTTS(text, { voice, pitch, speakingRate }) {
+  const accessToken = await getVertexAccessToken();
+  const projectId =
+    process.env.GOOGLE_PROJECT_ID ||
+    process.env.GCLOUD_PROJECT ||
+    process.env.GCP_PROJECT;
+  const location = process.env.GOOGLE_VERTEX_LOCATION || "europe-west1";
+  const model = process.env.GEMINI_TTS_MODEL || "gemini-2.5-pro-tts";
+
+  if (!projectId) {
+    throw new Error("Brak GOOGLE_PROJECT_ID / GCLOUD_PROJECT dla Gemini TTS");
+  }
+
+  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: String(text || "") }],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: "audio/mp3",
+      // Polskie dialogi, ale głos wybierany po nazwie (Zephyr / Achernar / Aoede / Erinome)
+      speechConfig: {
+        voice: voice || "zephyr",
+        languageCode: "pl-PL",
+        pitch,
+        speakingRate,
+      },
+    },
+  };
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    console.error("❌ Gemini TTS error:", res.status, txt);
+    throw new Error(`Gemini TTS failed: ${res.status}`);
+  }
+
+  const json = await res.json();
+  // Szukamy audio w odpowiedzi (inlineData)
+  const candidate = (json.candidates || [])[0];
+  const parts = candidate?.content?.parts || [];
+  const audioPart = parts.find(
+    (p) => p.inlineData && /^audio\//.test(p.inlineData.mimeType || "")
+  );
+  const data = audioPart?.inlineData?.data;
+  if (!data) {
+    console.warn("⚠️ Gemini TTS: no audio data in response");
+  }
+  return data || "";
+}
+
 export function clearTtsCaches() {
   try { ttsCache.clear(); } catch {}
   try { stylizeCache.clear(); } catch {}
@@ -181,7 +245,12 @@ export async function playTTS(text, options = {}) {
     const toneRaw = (options.tone || cfgTone || "swobodny").toLowerCase();
 
     const SIMPLE = engineRaw === "basic" || engineRaw === "wavenet";
-    const USE_VERTEX = engineRaw === "vertex" || engineRaw === "chirp" || process.env.TTS_USE_VERTEX !== "false";
+    const isGeminiTTS = engineRaw === "gemini-tts" || engineRaw === "gemini";
+    const isGeminiLive = engineRaw === "gemini-live";
+    const USE_VERTEX =
+      engineRaw === "vertex" ||
+      engineRaw === "chirp" ||
+      (!isGeminiTTS && !isGeminiLive && process.env.TTS_USE_VERTEX !== "false");
     const USE_LINEAR16 = process.env.TTS_LINEAR16 === "true"; // eksperymentalnie (lokalnie)
     const isChirpHD = engineRaw === "chirp" || /Chirp3-HD/i.test(String(voice));
 
@@ -198,6 +267,19 @@ export async function playTTS(text, options = {}) {
         : baseRate;
 
     console.log('[TTS]', 'Generating:', String(text || '').slice(0, 80) + '...');
+
+    // Gemini TTS / Gemini Live – użyj osobnego endpointu generatywnego
+    if (isGeminiTTS || isGeminiLive) {
+      console.log(
+        `[TTS] Using Gemini ${isGeminiLive ? "Live" : "2.5 Pro TTS"} voice: ${voice}`
+      );
+      const cacheKeyGemini = `${String(text)}|${voice}|${toneRaw}|gemini`;
+      if (ttsCache.has(cacheKeyGemini)) return ttsCache.get(cacheKeyGemini);
+      const audio = await playGeminiTTS(text, { voice, pitch, speakingRate });
+      ttsCache.set(cacheKeyGemini, audio);
+      if (ttsCache.size > 10) ttsCache.delete(ttsCache.keys().next().value);
+      return audio;
+    }
 
     // Użyj getVertexAccessToken zamiast bezpośredniego klucza API
     const accessToken = await getVertexAccessToken();
