@@ -12,6 +12,9 @@ const KEYS = [
   "cache_enabled",
   "amber_prompt",
   "speech_style",
+  "tts_pitch",
+  "tts_rate",
+  "tts_tone",
 ]
 
 const DEFAULT_CONFIG = {
@@ -22,6 +25,9 @@ const DEFAULT_CONFIG = {
   cache_enabled: true,
   amber_prompt: "",
   speech_style: "standard",
+  tts_pitch: 0,
+  tts_rate: 1.0,
+  tts_tone: "swobodny",
 }
 
 function safeMerge(base, value) {
@@ -67,6 +73,18 @@ export async function getConfig() {
         typeof map.speech_style === "string" && map.speech_style.trim().length > 0
           ? map.speech_style
           : DEFAULT_CONFIG.speech_style,
+      tts_pitch:
+        typeof map.tts_pitch === "number"
+          ? map.tts_pitch
+          : DEFAULT_CONFIG.tts_pitch,
+      tts_rate:
+        typeof map.tts_rate === "number"
+          ? map.tts_rate
+          : DEFAULT_CONFIG.tts_rate,
+      tts_tone:
+        typeof map.tts_tone === "string" && map.tts_tone.trim().length > 0
+          ? map.tts_tone
+          : DEFAULT_CONFIG.tts_tone,
     }
 
     return cfg

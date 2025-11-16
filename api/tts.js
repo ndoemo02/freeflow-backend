@@ -166,8 +166,6 @@ Nie zmieniaj faktów ani liczb. Intencja użytkownika: "${intent}".`;
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {
-    const { tone = "swobodny" } = options;
-
     // 🔧 Dynamiczne ustawienia TTS z system_config
     let cfg;
     try {
@@ -178,12 +176,26 @@ export async function playTTS(text, options = {}) {
     const voiceCfg = cfg?.tts_voice?.voice || process.env.TTS_VOICE || "pl-PL-Wavenet-A";
     const voice = options.voice || voiceCfg;
 
+    // 🎚️ Ton + tempo z configu lub z parametru
+    const cfgTone = (cfg?.tts_tone || "").toLowerCase();
+    const toneRaw = (options.tone || cfgTone || "swobodny").toLowerCase();
+
     const SIMPLE = engineRaw === "basic" || engineRaw === "wavenet";
     const USE_VERTEX = engineRaw === "vertex" || engineRaw === "chirp" || process.env.TTS_USE_VERTEX !== "false";
     const USE_LINEAR16 = process.env.TTS_LINEAR16 === "true"; // eksperymentalnie (lokalnie)
     const isChirpHD = engineRaw === "chirp" || /Chirp3-HD/i.test(String(voice));
-    const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
-    const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
+
+    const basePitch = toneRaw === "swobodny" ? 2 : toneRaw === "formalny" ? -1 : 0;
+    const baseRate = toneRaw === "swobodny" ? 1.1 : toneRaw === "formalny" ? 0.95 : 1.0;
+
+    const pitch =
+      typeof cfg?.tts_pitch === "number"
+        ? cfg.tts_pitch
+        : basePitch;
+    const speakingRate =
+      typeof cfg?.tts_rate === "number"
+        ? cfg.tts_rate
+        : baseRate;
 
     console.log('[TTS]', 'Generating:', String(text || '').slice(0, 80) + '...');
 
@@ -192,16 +204,16 @@ export async function playTTS(text, options = {}) {
     if (SIMPLE || !USE_VERTEX) {
       const plain = String(text || '').replace(/<[^>]+>/g, '');
       const audioEnc = 'MP3';
-      console.log(`🔊 Using BASIC TTS (Wavenet-D, ${audioEnc})`);
+      console.log(`🔊 Using BASIC TTS (${voice}, ${audioEnc})`);
       // Simple cache
-      const cacheKey = `${plain}|${voice}|${tone}`;
+      const cacheKey = `${plain}|${voice}|${toneRaw}`;
       if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey);
       const response = await fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input: { text: plain },
-          voice: { languageCode: 'pl-PL', name: 'pl-PL-Wavenet-D' },
+          voice: { languageCode: 'pl-PL', name: voice },
           // v1 API nie wspiera enableTimePointing – zawsze czysty MP3
           audioConfig: { audioEncoding: 'MP3' }
         })
@@ -228,7 +240,7 @@ export async function playTTS(text, options = {}) {
       audioConfig: (isChirpHD ? { audioEncoding: 'MP3' } : { audioEncoding: 'MP3', pitch, speakingRate })
     };
     console.log('🔊 Using Vertex: ' + voice);
-    const cacheKeyVertex = `${JSON.stringify(reqBody.input)}|${voice}|${tone}`;
+    const cacheKeyVertex = `${JSON.stringify(reqBody.input)}|${voice}|${toneRaw}`;
     if (ttsCache.has(cacheKeyVertex)) return ttsCache.get(cacheKeyVertex);
     let response = await fetch(
       endpoint,
@@ -273,7 +285,7 @@ export async function playTTS(text, options = {}) {
     const result = await response.json();
     console.log('✅ TTS audio generated successfully');
     const audioContent = result.audioContent;
-    const finalKey = endpoint.includes('europe-west1') ? cacheKeyVertex : `${String(text)}|${voice}|${tone}`;
+    const finalKey = endpoint.includes('europe-west1') ? cacheKeyVertex : `${String(text)}|${voice}|${toneRaw}`;
     ttsCache.set(finalKey, audioContent);
     if (ttsCache.size > 10) ttsCache.delete(ttsCache.keys().next().value);
     return audioContent; // base64
@@ -292,48 +304,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing text parameter" });
     }
 
-    // Adaptive tone parameters
-    const pitch = tone === "swobodny" ? 2 : tone === "formalny" ? -1 : 0;
-    const speakingRate = tone === "swobodny" ? 1.1 : tone === "formalny" ? 0.95 : 1.0;
-    
-    console.log('🎤 TTS (Vertex AI 2025) with tone:', { tone, pitch, speakingRate });
-
-    // Użyj getVertexAccessToken zamiast bezpośredniego klucza API
-    const accessToken = await getVertexAccessToken();
-    console.log('✅ Using GOOGLE_VOICEORDER_KEY_B64 (Vercel/Cloud)');
-
-    // Vertex AI TTS endpoint (2025) - standardowe API
-    const response = await fetch(
-      "https://texttospeech.googleapis.com/v1/text:synthesize",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          input: { text },
-          voice: {
-            languageCode: "pl-PL",
-            name: "pl-PL-Wavenet-D" // Wavenet damski - opcja podstawowa
-          },
-          audioConfig: {
-            audioEncoding: "MP3",
-            pitch,
-            speakingRate
-          }
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ TTS API error:', response.status, errorText);
-      return res.status(500).json({ error: "TTS API failed" });
-    }
-
-    const result = await response.json();
-    const audioContent = result.audioContent;
+    // Ujednolicone wywołanie przez playTTS – korzysta z configu (głos, ton, tempo)
+    const audioContent = await playTTS(text, { tone });
     const buffer = Buffer.from(audioContent, "base64");
 
     res.setHeader("Content-Type", "audio/mpeg");
