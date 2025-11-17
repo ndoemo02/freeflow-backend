@@ -29,6 +29,23 @@ export function normalizeTxt(s = '') {
     .trim();
 }
 
+// Mapowanie skrótów/aliasów nazw restauracji na rozwinięte formy,
+// które ułatwiają dopasowanie (np. "rezydencja" → "rezydencja luxury hotel").
+const RESTAURANT_ALIAS_MAP = {
+  'rezydencja': ['rezydencja luxury', 'rezydencja luxury hotel'],
+};
+
+export function expandRestaurantAliases(normalizedText = '') {
+  if (!normalizedText) return normalizedText;
+  let out = normalizedText;
+  for (const [key, arr] of Object.entries(RESTAURANT_ALIAS_MAP)) {
+    if (normalizedText.includes(key)) {
+      out += ' ' + arr.join(' ');
+    }
+  }
+  return out;
+}
+
 // ============================================================================
 // FUZZY MATCHING
 // ============================================================================

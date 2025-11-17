@@ -3,6 +3,7 @@ import { applyCORS } from './_cors.js';
 import { getVertexAccessToken } from '../utils/googleAuth.js';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
+import { VertexAI } from '@google-cloud/vertexai';
 import { getConfig } from "./config/configService.js";
 
 // Global Supabase client (avoid per-call instantiation)
@@ -12,34 +13,66 @@ export const supabase = createClient(
 );
 
 let openaiClient = null;
+let geminiModel = null;
+let vertexClient = null;
 // Simple in-memory cache (LRU up to 10 entries)
 const ttsCache = new Map();
 // Cache dla krótkiej stylizacji GPT-4o (max 20 wpisów)
 const stylizeCache = new Map();
 
-// --- Gemini TTS helper (experimental) ---
-async function playGeminiTTS(text, { voice, pitch, speakingRate }) {
-  const accessToken = await getVertexAccessToken();
-  const projectId =
+// Proste mapowanie aliasów głosów (np. "pl-PL-Chirp3-HD-Erinome") na realne nazwy Google TTS.
+// Dzięki temu tryb „chirp” z panelem admina działa jak dawniej (Chirp HD na Wavenet).
+function normalizeGoogleVoice(engineRaw, voice) {
+  const raw = String(voice || "");
+  // Alias: eksperymentalny głos Chirp3-HD-Erinome -> wysokiej jakości damski Wavenet
+  if (/Chirp3-HD-Erinome/i.test(raw)) {
+    return "pl-PL-Wavenet-A";
+  }
+  return raw;
+}
+
+function getVertexClient() {
+  if (vertexClient) return vertexClient;
+  // Preferuj nowe nazwy ENV sugerowane przez użytkownika
+  const project =
     process.env.GOOGLE_PROJECT_ID ||
     process.env.GCLOUD_PROJECT ||
-    process.env.GCP_PROJECT;
-  // Generative modele Gemini zwykle działają w lokalizacji "global"
+    process.env.GOOGLE_PROJECT ||
+    process.env.GOOGLE_CLOUD_PROJECT;
   const location =
+    process.env.GOOGLE_TTS_LOCATION ||
+    process.env.GCLOUD_LOCATION ||
     process.env.GEMINI_TTS_LOCATION ||
     process.env.GOOGLE_VERTEX_LOCATION ||
     "global";
-  const model = process.env.GEMINI_TTS_MODEL || "gemini-2.5-pro-tts";
-
-  if (!projectId) {
-    throw new Error("Brak GOOGLE_PROJECT_ID / GCLOUD_PROJECT dla Gemini TTS");
+  if (!project) {
+    throw new Error("Brak GOOGLE_PROJECT_ID / GCLOUD_PROJECT – VertexAI wymaga jawnego project id");
   }
+  vertexClient = new VertexAI({ project, location });
+  return vertexClient;
+}
 
-  const endpoint = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+function getGeminiModel(isLive = false) {
+  if (geminiModel && !isLive) return geminiModel;
 
-  // Minimalny, wspierany payload: tylko treść i typ odpowiedzi audio.
-  // Głos/tempo będą na razie domyślne po stronie Gemini.
-  const body = {
+  const vertex = getVertexClient();
+  const modelName =
+    (isLive
+      ? process.env.GEMINI_LIVE_MODEL
+      : process.env.GEMINI_TTS_MODEL) ||
+    (isLive ? "gemini-2.5-pro-tts" : "gemini-2.5-pro-tts");
+
+  const model = vertex.getGenerativeModel({ model: modelName });
+  if (!isLive) geminiModel = model;
+  return model;
+}
+
+// --- Gemini TTS helper via VertexAI SDK ---
+async function playGeminiTTS(text, { voice, pitch, speakingRate, live = false }) {
+  const model = getGeminiModel(live);
+  const voiceId = String(voice || "ZEPHYR");
+
+  const result = await model.generateContent({
     contents: [
       {
         role: "user",
@@ -47,37 +80,25 @@ async function playGeminiTTS(text, { voice, pitch, speakingRate }) {
       },
     ],
     generationConfig: {
-      responseMimeType: "audio/mp3",
+      audioConfig: {
+        voiceConfig: { voice: voiceId },
+        audioEncoding: "LINEAR16",
+        pitch: typeof pitch === "number" ? pitch : 0,
+        speakingRate:
+          typeof speakingRate === "number" ? speakingRate : 1.0,
+      },
     },
-  };
-
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
   });
 
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    console.error("❌ Gemini TTS error:", res.status, txt);
-    throw new Error(`Gemini TTS failed: ${res.status}`);
-  }
-
-  const json = await res.json();
-  // Szukamy audio w odpowiedzi (inlineData)
-  const candidate = (json.candidates || [])[0];
-  const parts = candidate?.content?.parts || [];
-  const audioPart = parts.find(
+  const candidate = result?.response?.candidates?.[0];
+  const part = candidate?.content?.parts?.find(
     (p) => p.inlineData && /^audio\//.test(p.inlineData.mimeType || "")
   );
-  const data = audioPart?.inlineData?.data;
-  if (!data) {
+  const base64 = part?.inlineData?.data || "";
+  if (!base64) {
     console.warn("⚠️ Gemini TTS: no audio data in response");
   }
-  return data || "";
+  return base64;
 }
 
 export function clearTtsCaches() {
@@ -114,6 +135,20 @@ export function refineSpeechText(text, intent) {
   } catch { return text; }
 }
 
+// Dodatkowa normalizacja pod TTS – porządkuje białe znaki, dodaje kropki po numeracji
+// i rozdziela przypadki z wielką literą po spacji (często dwie frazy sklejone).
+function normalizeForTTS(text) {
+  if (!text) return "";
+  let t = text;
+  // 4.7 → 4,7  (żeby nie było "cztery. siedem")
+  t = t.replace(/(\d)\.(\d)/g, "$1,$2");
+  // usuwamy myślniki typu "Chcesz-zobaczyć-inne"
+  t = t.replace(/(\p{L})\s*-\s*(\p{L})/gu, "$1 $2");
+  // porządek ze spacjami
+  t = t.replace(/\s+/g, " ").trim();
+  return t;
+}
+
 // Buduje prosty SSML: <speak>…</speak> + pauzy
 export function applySSMLStyling(reply, intent = 'neutral') {
   try {
@@ -121,10 +156,11 @@ export function applySSMLStyling(reply, intent = 'neutral') {
     if (!raw) return reply;
     if (/<\s*speak[\s>]/i.test(raw)) return raw; // już SSML
     raw = refineSpeechText(raw, intent) || raw;
-    raw = raw.replace(/\s*,\s*/g, ', <break time="250ms"/> ');
-    raw = raw.replace(/\s+oraz\s+/gi, ' <break time="250ms"/> oraz ');
-    raw = raw.replace(/\s+i\s+/gi, ' <break time="250ms"/> i ');
-    raw = raw.replace(/([\.!])\s+/g, '$1 <break time="250ms"/> ');
+    // Wymuś krótkie pauzy na przecinkach i spójnikach; delikatnie dłuższe po kropce
+    raw = raw.replace(/\s*,\s*/g, ', <break time="300ms"/> ');
+    raw = raw.replace(/\s+oraz\s+/gi, ' <break time="280ms"/> oraz ');
+    raw = raw.replace(/\s+i\s+/gi, ' <break time="260ms"/> i ');
+    raw = raw.replace(/([\.!])\s+/g, '$1 <break time="350ms"/> ');
     return `<speak>${raw}</speak>`;
   } catch { return reply; }
 }
@@ -229,6 +265,8 @@ Nie zmieniaj faktów ani liczb. Intencja użytkownika: "${intent}".`;
 // Funkcja do odtwarzania TTS (używana przez watchdog i inne moduły)
 export async function playTTS(text, options = {}) {
   try {
+    // Pre-normalizacja treści (zanim pójdzie do jakiegokolwiek silnika)
+    text = normalizeForTTS(text);
     // 🔧 Dynamiczne ustawienia TTS z system_config
     let cfg;
     try {
@@ -237,21 +275,41 @@ export async function playTTS(text, options = {}) {
 
     const engineRaw = (cfg?.tts_engine?.engine || process.env.TTS_MODE || "vertex").toLowerCase();
     const voiceCfg = cfg?.tts_voice?.voice || process.env.TTS_VOICE || "pl-PL-Wavenet-A";
-    const voice = options.voice || voiceCfg;
+    const rawVoice = options.voice || voiceCfg;
+    const voice = normalizeGoogleVoice(engineRaw, rawVoice);
 
     // 🎚️ Ton + tempo z configu lub z parametru
     const cfgTone = (cfg?.tts_tone || "").toLowerCase();
     const toneRaw = (options.tone || cfgTone || "swobodny").toLowerCase();
 
-    const SIMPLE = engineRaw === "basic" || engineRaw === "wavenet";
-    const isGeminiTTS = engineRaw === "gemini-tts" || engineRaw === "gemini";
-    const isGeminiLive = engineRaw === "gemini-live";
-    const USE_VERTEX =
-      engineRaw === "vertex" ||
-      engineRaw === "chirp" ||
-      (!isGeminiTTS && !isGeminiLive && process.env.TTS_USE_VERTEX !== "false");
+    // BASIC/Wavenet/Chirp – korzystają z klasycznego Text-to-Speech v1 (bardzo stabilne na Vercel)
+    const SIMPLE =
+      engineRaw === "basic" ||
+      engineRaw === "wavenet" ||
+      engineRaw === "chirp";
+    let isGeminiTTS =
+      engineRaw === "gemini-tts" ||
+      engineRaw === "gemini_tts" ||
+      engineRaw === "gemini";
+    const isGeminiLive =
+      engineRaw === "gemini-live" ||
+      engineRaw === "gemini_live";
+    // Vertex jako osobny tryb – tylko gdy wybrany w system_config / ENV
+    let USE_VERTEX = engineRaw === "vertex";
     const USE_LINEAR16 = process.env.TTS_LINEAR16 === "true"; // eksperymentalnie (lokalnie)
-    const isChirpHD = engineRaw === "chirp" || /Chirp3-HD/i.test(String(voice));
+    const isChirpHD = engineRaw === "chirp" || /Chirp3-HD/i.test(String(rawVoice));
+    // Auto‑korekta silnika na podstawie wybranego głosu:
+    // - jeżeli ktoś wybrał głos Geminiego (zephyr/aoede/erinome/achernar), ale engine = Vertex/Wavenet,
+    //   to przełączamy na Gemini TTS (unikamy 404 i fallbacku do Wavenet).
+    const lowerVoice = String(rawVoice).toLowerCase();
+    const geminiVoiceNames = new Set(['zephyr','aoede','erinome','achernar']);
+    // Auto-switch wyłącznie, jeśli głos to dokładnie nazwa Geminiego (bez prefiksów pl-PL-/Chirp)
+    if (!isGeminiTTS && geminiVoiceNames.has(lowerVoice)) {
+      isGeminiTTS = true;
+      USE_VERTEX = false;
+      console.log('[TTS] Auto-switch: voice is Gemini-specific, using Gemini TTS');
+    }
+
 
     const basePitch = toneRaw === "swobodny" ? 2 : toneRaw === "formalny" ? -1 : 0;
     const baseRate = toneRaw === "swobodny" ? 1.1 : toneRaw === "formalny" ? 0.95 : 1.0;
@@ -267,36 +325,83 @@ export async function playTTS(text, options = {}) {
 
     console.log('[TTS]', 'Generating:', String(text || '').slice(0, 80) + '...');
 
-    // Gemini TTS / Gemini Live – użyj osobnego endpointu generatywnego
+    // Gemini TTS / Gemini Live – użyj oficjalnego SDK
     if (isGeminiTTS || isGeminiLive) {
       console.log(
         `[TTS] Using Gemini ${isGeminiLive ? "Live" : "2.5 Pro TTS"} voice: ${voice}`
       );
-      const cacheKeyGemini = `${String(text)}|${voice}|${toneRaw}|gemini`;
+      const cacheKeyGemini = `${String(text)}|${voice}|${toneRaw}|gemini${isGeminiLive ? ":live" : ""}`;
       if (ttsCache.has(cacheKeyGemini)) return ttsCache.get(cacheKeyGemini);
-      const audio = await playGeminiTTS(text, { voice, pitch, speakingRate });
-      ttsCache.set(cacheKeyGemini, audio);
-      if (ttsCache.size > 10) ttsCache.delete(ttsCache.keys().next().value);
-      return audio;
+      try {
+        const audio = await playGeminiTTS(text, {
+          voice,
+          pitch,
+          speakingRate,
+          live: isGeminiLive,
+        });
+        // Ochrona przed zwrotem HTML (np. <!DOCTYPE ...>) lub tekstu niebase64
+        if (!audio || /^</.test(String(audio).trim())) {
+          throw new Error("Gemini returned non-audio payload");
+        }
+        ttsCache.set(cacheKeyGemini, audio);
+        if (ttsCache.size > 10) ttsCache.delete(ttsCache.keys().next().value);
+        return audio;
+      } catch (err) {
+        console.warn(`⚠️ Gemini TTS failed: ${err?.message || err}. Falling back to BASIC/Wavenet.`);
+        // Nie zwracaj – przejdź do ścieżki BASIC/Wavenet/Vertex poniżej
+      }
     }
 
     // Użyj getVertexAccessToken zamiast bezpośredniego klucza API
     const accessToken = await getVertexAccessToken();
     if (SIMPLE || !USE_VERTEX) {
-      const plain = String(text || '').replace(/<[^>]+>/g, '');
+      const original = String(text || '');
+      const hasSSML = /<\s*speak[\s>]/i.test(original);
+      const ssml = hasSSML ? original : applySSMLStyling(original);
       const audioEnc = 'MP3';
-      console.log(`🔊 Using BASIC TTS (${voice}, ${audioEnc})`);
-      // Simple cache
-      const cacheKey = `${plain}|${voice}|${toneRaw}`;
+
+      // Jeżeli głos nie jest w formacie Google (np. "zephyr"), użyj bezpiecznego Wavenet-D
+      let googleVoiceName = voice;
+      const isGoogleVoice = /^[a-z]{2}-[A-Z]{2}-/.test(googleVoiceName);
+      if (!isGoogleVoice) {
+        const geminiToGoogleFallback = {
+          zephyr: 'pl-PL-Wavenet-D',
+          aoede: 'pl-PL-Wavenet-A',
+          erinome: 'pl-PL-Wavenet-A',
+          achernar: 'pl-PL-Wavenet-D'
+        };
+        const mapped = geminiToGoogleFallback[String(googleVoiceName).toLowerCase()];
+        googleVoiceName = mapped || 'pl-PL-Wavenet-D';
+        console.log(`[TTS] Voice fallback → ${googleVoiceName}`);
+      }
+      const langMatch = googleVoiceName.match(/^([a-z]{2}-[A-Z]{2})-/);
+      const languageCode = langMatch ? langMatch[1] : 'pl-PL';
+
+      const engineLabel = engineRaw === "chirp" ? "Chirp HD" : "BASIC";
+      console.log(`🔊 Using ${engineLabel} TTS (${googleVoiceName}, ${audioEnc})`);
+
+      // Simple cache – po SSML, bo ma wpływ na wynik
+      const cacheKey = `${ssml}|${googleVoiceName}|${toneRaw}|${engineRaw}`;
       if (ttsCache.has(cacheKey)) return ttsCache.get(cacheKey);
+
+      const audioConfig = {
+        audioEncoding: 'MP3',
+        pitch,
+        speakingRate,
+      };
+
+      // Specjalny profil dla trybu „chirp” – jak w /api/tts-chirp-hd.js
+      if (isChirpHD) {
+        audioConfig.effectsProfileId = ["headphone-class-device"];
+      }
+
       const response = await fetch("https://texttospeech.googleapis.com/v1/text:synthesize", {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          input: { text: plain },
-          voice: { languageCode: 'pl-PL', name: voice },
-          // v1 API nie wspiera enableTimePointing – zawsze czysty MP3
-          audioConfig: { audioEncoding: 'MP3' }
+          input: { ssml },
+          voice: { languageCode, name: googleVoiceName },
+          audioConfig
         })
       });
       if (!response.ok) {

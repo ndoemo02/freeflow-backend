@@ -6,6 +6,9 @@ $vars = @{
   "TTS_LINEAR16"     = "false"
   "TTS_DEFAULT_VOICE"= "pl-PL-Wavenet-D"
   "TTS_TONE"         = "swobodny"
+  # Vertex/Gemini explicit project/location to avoid SDK auto-detection issues
+  "GOOGLE_PROJECT_ID" = "freeflow-voiceorder"
+  "GEMINI_TTS_LOCATION" = "us-central1"
 }
 
 foreach ($k in $vars.Keys) {

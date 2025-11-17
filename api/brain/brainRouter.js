@@ -2138,19 +2138,36 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
           try {
             const poItems = (parsedOrder?.items) || (firstGroup?.items || []);
             if (poItems?.length) {
-              s.pendingOrder = {
-                items: poItems.map(it => ({
-                  id: it.id,
-                  name: it.name || it.item_name,
-                  price_pln: Number(it.price_pln ?? it.price ?? 0),
-                  qty: Number(it.qty || it.quantity || 1),
-                })),
-                restaurant: targetRestaurant?.name || s.lastRestaurant?.name,
-                restaurant_id: targetRestaurant?.id || s.lastRestaurant?.id,
-                total: Number(parsedOrder?.totalPrice ?? sum(poItems)).toFixed(2),
-              };
+              const incoming = poItems.map(it => ({
+                id: it.id,
+                name: it.name || it.item_name,
+                price_pln: Number(it.price_pln ?? it.price ?? 0),
+                qty: Number(it.qty || it.quantity || 1),
+              }));
+              const restName = targetRestaurant?.name || s.lastRestaurant?.name;
+              const restId = targetRestaurant?.id || s.lastRestaurant?.id;
+              if (s.pendingOrder && Array.isArray(s.pendingOrder.items) && s.pendingOrder.restaurant_id === restId) {
+                const merged = [...s.pendingOrder.items];
+                for (const inc of incoming) {
+                  const idx = merged.findIndex(m =>
+                    (m.id && inc.id && m.id === inc.id) ||
+                    (m.name && inc.name && m.name.toLowerCase() === inc.name.toLowerCase())
+                  );
+                  if (idx >= 0) merged[idx].qty = Number(merged[idx].qty || 1) + Number(inc.qty || 1);
+                  else merged.push(inc);
+                }
+                s.pendingOrder.items = merged;
+                s.pendingOrder.total = Number(sum(merged)).toFixed(2);
+              } else {
+                s.pendingOrder = {
+                  items: incoming,
+                  restaurant: restName,
+                  restaurant_id: restId,
+                  total: Number(parsedOrder?.totalPrice ?? sum(poItems)).toFixed(2),
+                };
+              }
               s.expectedContext = 'confirm_order';
-              console.log('🧠 Saved pending order to session:', s.pendingOrder);
+              console.log('🧠 Saved/merged pending order to session:', s.pendingOrder);
               updateSession(sessionId, s);
             } else {
               console.log('ℹ️ create_order: parsedOrder empty, nothing to save.');

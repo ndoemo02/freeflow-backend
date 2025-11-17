@@ -7,6 +7,7 @@ import {
   normalize,
   stripDiacritics,
   normalizeTxt,
+  expandRestaurantAliases,
   extractQuantity,
   extractSize,
   fuzzyIncludes as fuzzyIncludesHelper,
@@ -825,6 +826,17 @@ export async function detectIntent(text, session = null) {
 
     // Słowa kluczowe już zdefiniowane wcześniej
 
+    // 🔹 Szybka reguła: „w okolicy / w pobliżu / blisko” → preferuj find_nearby
+    if (/\b(w pobliżu|w poblizu|w okolicy|blisko)\b/i.test(lower)) {
+      updateDebugSession({ 
+        intent: 'find_nearby', 
+        restaurant: null,
+        sessionId: session?.id || null,
+        confidence: 0.85
+      });
+      return { intent: 'find_nearby', restaurant: null };
+    }
+
     // 🔹 PRIORYTET 0: Sprawdź czy w tekście jest ilość (2x, 3x, "dwa razy", etc.)
     // Jeśli tak, to najprawdopodobniej user chce zamówić, nie wybierać restauracji
     const quantityPattern = /(\d+\s*x|\d+\s+razy|dwa\s+razy|trzy\s+razy|kilka)/i;
@@ -862,7 +874,8 @@ export async function detectIntent(text, session = null) {
     console.log('🔍 Znaleziono restauracji:', restaurantsList?.length || 0);
 
     if (restaurantsList?.length) {
-      const normalizedText = normalizeTxt(text);
+      let normalizedText = normalizeTxt(text);
+      normalizedText = expandRestaurantAliases(normalizedText);
       console.log('🔍 Normalizowany tekst:', normalizedText);
       for (const r of restaurantsList) {
         const normalizedName = normalizeTxt(r.name);
