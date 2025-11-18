@@ -15,6 +15,7 @@ const KEYS = [
   "tts_pitch",
   "tts_rate",
   "tts_tone",
+  "restaurant_aliases",
 ]
 
 const DEFAULT_CONFIG = {
@@ -28,6 +29,7 @@ const DEFAULT_CONFIG = {
   tts_pitch: 0,
   tts_rate: 1.0,
   tts_tone: "swobodny",
+  restaurant_aliases: {},
 }
 
 function safeMerge(base, value) {
@@ -85,6 +87,10 @@ export async function getConfig() {
         typeof map.tts_tone === "string" && map.tts_tone.trim().length > 0
           ? map.tts_tone
           : DEFAULT_CONFIG.tts_tone,
+        restaurant_aliases:
+          map.restaurant_aliases && typeof map.restaurant_aliases === "object"
+            ? map.restaurant_aliases
+            : { ...DEFAULT_CONFIG.restaurant_aliases },
     }
 
     return cfg
@@ -136,6 +142,43 @@ export async function updatePrompt(prompt) {
   const value = typeof prompt === "string" ? prompt : String(prompt ?? "")
   await updateConfig("amber_prompt", value)
   return getPrompt()
+}
+
+export async function getRestaurantAliases() {
+  try {
+    const cfg = await getConfig()
+    return cfg.restaurant_aliases || {}
+  } catch {
+    return {}
+  }
+}
+
+export async function upsertRestaurantAlias(alias, canonical) {
+  const normalizedAlias = String(alias || "").trim().toLowerCase()
+  if (!normalizedAlias) return getRestaurantAliases()
+  const canonicalValue = Array.isArray(canonical)
+    ? canonical.map((c) => String(c || "").trim()).filter(Boolean)
+    : [String(canonical || "").trim()].filter(Boolean)
+  if (!canonicalValue.length) return getRestaurantAliases()
+
+  const current = await getRestaurantAliases()
+  const updated = {
+    ...current,
+    [normalizedAlias]: canonicalValue.length === 1 ? canonicalValue[0] : canonicalValue,
+  }
+  await updateConfig("restaurant_aliases", updated)
+  return updated
+}
+
+export async function deleteRestaurantAlias(alias) {
+  const normalizedAlias = String(alias || "").trim().toLowerCase()
+  if (!normalizedAlias) return getRestaurantAliases()
+  const current = await getRestaurantAliases()
+  if (!current[normalizedAlias]) return current
+  const updated = { ...current }
+  delete updated[normalizedAlias]
+  await updateConfig("restaurant_aliases", updated)
+  return updated
 }
 
 

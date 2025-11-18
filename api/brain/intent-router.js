@@ -1,6 +1,7 @@
 import { supabase } from '../_supabase.js';
 import { createOrder } from '../orders.js';
 import { updateDebugSession } from '../debug.js';
+import { getRestaurantAliases } from '../config/configService.js';
 
 // ——— Utils: Import from helpers ———
 import {
@@ -16,6 +17,21 @@ import {
 
 // Re-export for compatibility
 export { normalize, stripDiacritics, normalizeTxt, extractQuantity, extractSize };
+
+let aliasCache = { value: {}, ts: 0 };
+async function getAliasMapCached() {
+  const now = Date.now();
+  if (aliasCache.value && (now - aliasCache.ts) < 60_000) {
+    return aliasCache.value;
+  }
+  try {
+    const data = await getRestaurantAliases();
+    aliasCache = { value: data || {}, ts: Date.now() };
+    return aliasCache.value;
+  } catch {
+    return aliasCache.value || {};
+  }
+}
 
 function nameHasSize(name, size) {
   if (!size) return false;
@@ -875,7 +891,12 @@ export async function detectIntent(text, session = null) {
 
     if (restaurantsList?.length) {
       let normalizedText = normalizeTxt(text);
-      normalizedText = expandRestaurantAliases(normalizedText);
+      try {
+        const aliasMap = await getAliasMapCached();
+        normalizedText = expandRestaurantAliases(normalizedText, aliasMap);
+      } catch {
+        normalizedText = expandRestaurantAliases(normalizedText);
+      }
       console.log('🔍 Normalizowany tekst:', normalizedText);
       for (const r of restaurantsList) {
         const normalizedName = normalizeTxt(r.name);

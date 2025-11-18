@@ -314,6 +314,18 @@ app.post('/api/admin/config', async (req, res) => {
   try { const mod = await import('./admin/config.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+app.get('/api/admin/aliases', async (req, res) => {
+  try { const mod = await import('./admin/aliases.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.post('/api/admin/aliases', async (req, res) => {
+  try { const mod = await import('./admin/aliases.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+app.delete('/api/admin/aliases', async (req, res) => {
+  try { const mod = await import('./admin/aliases.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
 app.get('/api/admin/live', async (req, res) => {
   try { const mod = await import('./admin/live.js'); return mod.default(req, res); }
   catch (err) { res.status(500).json({ ok: false, error: err.message, data: [] }); }

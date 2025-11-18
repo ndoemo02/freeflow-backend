@@ -31,14 +31,31 @@ export function normalizeTxt(s = '') {
 
 // Mapowanie skrótów/aliasów nazw restauracji na rozwinięte formy,
 // które ułatwiają dopasowanie (np. "rezydencja" → "rezydencja luxury hotel").
-const RESTAURANT_ALIAS_MAP = {
+const BASE_RESTAURANT_ALIAS_MAP = {
   'rezydencja': ['rezydencja luxury', 'rezydencja luxury hotel'],
 };
 
-export function expandRestaurantAliases(normalizedText = '') {
+function normalizeAliasMap(map = {}) {
+  const result = { ...BASE_RESTAURANT_ALIAS_MAP };
+  if (!map || typeof map !== 'object') return result;
+  for (const [alias, canonical] of Object.entries(map)) {
+    const key = String(alias || '').trim().toLowerCase();
+    if (!key) continue;
+    const values = Array.isArray(canonical)
+      ? canonical.map((c) => String(c || '').trim().toLowerCase()).filter(Boolean)
+      : [String(canonical || '').trim().toLowerCase()].filter(Boolean);
+    if (!values.length) continue;
+    if (!result[key]) result[key] = [];
+    result[key] = Array.from(new Set([...result[key], ...values]));
+  }
+  return result;
+}
+
+export function expandRestaurantAliases(normalizedText = '', dynamicMap = {}) {
   if (!normalizedText) return normalizedText;
+  const aliasMap = normalizeAliasMap(dynamicMap);
   let out = normalizedText;
-  for (const [key, arr] of Object.entries(RESTAURANT_ALIAS_MAP)) {
+  for (const [key, arr] of Object.entries(aliasMap)) {
     if (normalizedText.includes(key)) {
       out += ' ' + arr.join(' ');
     }
