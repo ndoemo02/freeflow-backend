@@ -5,10 +5,7 @@ import { getConfig } from "../config/configService.js";
 import { getSession, updateSession } from "./context.js";
 import { playTTS, stylizeWithGPT4o } from "../tts.js";
 import { extractLocation } from "./helpers.js";
-import {
-  commitPendingOrder,
-  sumCartItems,
-} from "./cartService.js";
+import { commitPendingOrder } from "./cartService.js";
 import {
   normalize,
   fuzzyMatch,
@@ -26,9 +23,16 @@ import {
   getNearbyCityCandidates,
   findRestaurantByName,
 } from "./locationService.js";
-import { getMenuItems, buildMenuPreview, loadMenuPreview } from "./menuService.js";
+import { loadMenuPreview, sumCartItems } from "./menuService.js";
 import { handleFindNearby } from "./handlers/findNearbyHandler.js";
 import { handleMenuRequest } from "./handlers/menuRequestHandler.js";
+import { handleCreateOrder } from "./handlers/createOrderHandler.js";
+
+const CORE_INTENT_HANDLERS = {
+  find_nearby: handleFindNearby,
+  menu_request: handleMenuRequest,
+  create_order: handleCreateOrder,
+};
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const IS_TEST = !!(process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test');
@@ -424,81 +428,6 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
 }
 
 /**
- * Rozszerza typ kuchni na listę aliasów (jeśli istnieją)
- * @param {string|null} cuisineType - Typ kuchni do rozszerzenia
- * @returns {string[]} - Lista typów kuchni (może być 1 element lub więcej)
- */
-function expandCuisineType(cuisineType) {
-  if (!cuisineType) return null;
-
-  const normalized = normalize(cuisineType);
-
-  // Sprawdź czy to alias
-  if (cuisineAliases[normalized]) {
-    console.log(`🔄 Cuisine alias expanded: "${cuisineType}" → [${cuisineAliases[normalized].join(', ')}]`);
-    return cuisineAliases[normalized];
-  }
-
-  // Jeśli nie alias, zwróć jako single-element array
-  return [cuisineType];
-}
-
-function extractCuisineType(text) {
-  const normalized = normalize(text);
-
-  // Mapowanie słów kluczowych → cuisine_type w bazie
-  const cuisineMap = {
-    'pizza': 'Pizzeria',
-    'pizze': 'Pizzeria',
-    'pizzy': 'Pizzeria',
-    'pizzeria': 'Pizzeria',
-    'kebab': 'Kebab',
-    'kebaba': 'Kebab',
-    'kebabu': 'Kebab',
-    'burger': 'Amerykańska',
-    'burgera': 'Amerykańska',
-    'burgery': 'Amerykańska',
-    'hamburgera': 'Amerykańska',
-    'wloska': 'Włoska',
-    'wloskiej': 'Włoska',
-    'polska': 'Polska',
-    'polskiej': 'Polska',
-    'wietnamska': 'Wietnamska',
-    'wietnamskiej': 'Wietnamska',
-    'chinska': 'Chińska',
-    'chinskiej': 'Chińska',
-    'tajska': 'Tajska',
-    'tajskiej': 'Tajska',
-    'miedzynarodowa': 'Międzynarodowa',
-    'miedzynarodowej': 'Międzynarodowa',
-    // Aliasy semantyczne
-    'azjatyckie': 'azjatyckie',
-    'azjatyckiej': 'azjatyckiej',
-    'orientalne': 'orientalne',
-    'orientalnej': 'orientalnej',
-    'fastfood': 'fastfood',
-    'fast food': 'fast food',
-    'lokalne': 'lokalne',
-    'lokalnej': 'lokalnej',
-    'domowe': 'domowe',
-    'domowej': 'domowej',
-    // Wege (fallback)
-    'wege': 'wege',
-    'wegetarianskie': 'wege',
-    'wegetarianskiej': 'wege'
-  };
-
-  for (const [keyword, cuisineType] of Object.entries(cuisineMap)) {
-    if (normalized.includes(keyword)) {
-      console.log(`🍕 Extracted cuisine type: "${cuisineType}" (keyword: "${keyword}")`);
-      return cuisineType;
-    }
-  }
-
-  return null;
-}
-
-/**
  * Główny router mózgu FreeFlow
  * 1) analizuje tekst
  * 2) kieruje do intencji / bazy
@@ -756,7 +685,27 @@ export default async function handler(req, res) {
     let meta = {};
 
     // 🔹 Krok 3: logika wysokopoziomowa
-    switch (intent) {
+    const mappedHandler = CORE_INTENT_HANDLERS[intent];
+    if (mappedHandler) {
+      const handlerResult = await mappedHandler({
+        text,
+        sessionId,
+        prevLocation,
+        parsed,
+        parsedOrder,
+        req,
+        res,
+        withDb,
+      });
+      if (handlerResult?.handled) {
+        return;
+      }
+      replyCore = handlerResult?.reply || "";
+      if (handlerResult?.meta) {
+        meta = { ...meta, ...handlerResult.meta };
+      }
+    } else {
+      switch (intent) {
       case "find_nearby": {
         const result = await handleFindNearby({ text, sessionId, prevLocation, req, res });
         if (result?.handled) {
@@ -1006,302 +955,20 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
       }
 
       case "create_order": {
-        console.log('🧠 create_order intent detected');
-        
-        // 🚨 Pre-check: jeśli brak last_location w sesji → wymaga lokalizacji
-        const s = getSession(sessionId) || {};
-        if (!s?.last_location && !s?.lastRestaurant) {
-          // Jeśli użytkownik używa fraz typu "gdzie"/"w pobliżu" → to jest jednak find_nearby
-          const n = normalize(text || '');
-          if (/\bgdzie\b/.test(n) || /w poblizu|w pobli/u.test(n)) {
-            const prompt = "Brak lokalizacji. Podaj nazwę miasta (np. Piekary) lub powiedz 'w pobliżu'.";
-            return res.status(200).json({ ok: true, intent: "find_nearby", reply: prompt, fallback: true, context: s });
-          }
-          replyCore = "Brak lokalizacji. Podaj nazwę miasta lub powiedz 'w pobliżu'.";
-          return res.status(200).json({ ok: true, intent: "create_order", reply: replyCore, fallback: true, context: s });
-        }
-        
-        try {
-          // 🎯 PRIORITY: Użyj parsedOrder z detectIntent() jeśli dostępny
-          if (parsedOrder?.any) {
-          console.log('✅ Using parsedOrder from detectIntent()');
-
-          // Wybierz pierwszą grupę (restaurację) z parsed order – z ochroną na brak grup
-          let firstGroup = (parsedOrder.groups && parsedOrder.groups.length > 0) ? parsedOrder.groups[0] : null;
-          let targetRestaurant = null;
-          if (firstGroup?.restaurant_name) {
-            targetRestaurant = await findRestaurantByName(firstGroup.restaurant_name);
-          } else {
-            // Brak grup w parsedOrder – użyj restauracji z sesji
-            const s2 = getSession(sessionId) || {};
-            targetRestaurant = s2.lastRestaurant || null;
-          }
-
-          if (!targetRestaurant) {
-            console.warn('⚠️ Restaurant from parsedOrder not found');
-            // Spróbuj sparsować pozycje względem restauracji z sesji
-            const s2 = getSession(sessionId) || {};
-            if (s2.lastRestaurant) {
-              const fallbackItems = await parseOrderItems(text, s2.lastRestaurant.id);
-              if (fallbackItems.length) {
-                const total = fallbackItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-                const itemsList = fallbackItems.map(item => `${item.quantity}x ${item.name} (${(item.price * item.quantity).toFixed(2)} zł)`).join(', ');
-                replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
-                updateSession(sessionId, { expectedContext: 'confirm_order', pendingOrder: { restaurant: s2.lastRestaurant, items: fallbackItems, total } });
-                break;
-              }
-            }
-            replyCore = `Nie mogę znaleźć restauracji dla tego zamówienia. Spróbuj wskazać nazwę lokalu lub wybierz z listy.`;
-            break;
-          }
-
-          updateSession(sessionId, { lastRestaurant: targetRestaurant });
-
-          // ===== PATCH: save pending order (BEGIN) =====
-          try {
-            const poItems = (parsedOrder?.items) || (firstGroup?.items || []);
-            if (poItems?.length) {
-              const incoming = poItems.map(it => ({
-                  id: it.id,
-                  name: it.name || it.item_name,
-                  price_pln: Number(it.price_pln ?? it.price ?? 0),
-                  qty: Number(it.qty || it.quantity || 1),
-              }));
-              const restName = targetRestaurant?.name || s.lastRestaurant?.name;
-              const restId = targetRestaurant?.id || s.lastRestaurant?.id;
-              if (s.pendingOrder && Array.isArray(s.pendingOrder.items) && s.pendingOrder.restaurant_id === restId) {
-                const merged = [...s.pendingOrder.items];
-                for (const inc of incoming) {
-                  const idx = merged.findIndex(m =>
-                    (m.id && inc.id && m.id === inc.id) ||
-                    (m.name && inc.name && m.name.toLowerCase() === inc.name.toLowerCase())
-                  );
-                  if (idx >= 0) merged[idx].qty = Number(merged[idx].qty || 1) + Number(inc.qty || 1);
-                  else merged.push(inc);
-                }
-                s.pendingOrder.items = merged;
-                s.pendingOrder.total = Number(sumCartItems(merged)).toFixed(2);
-              } else {
-                s.pendingOrder = {
-                  items: incoming,
-                  restaurant: restName,
-                  restaurant_id: restId,
-                total: Number(parsedOrder?.totalPrice ?? sumCartItems(poItems)).toFixed(2),
-              };
-              }
-              s.expectedContext = 'confirm_order';
-              console.log('🧠 Saved/merged pending order to session:', s.pendingOrder);
-              updateSession(sessionId, s);
-            } else {
-              console.log('ℹ️ create_order: parsedOrder empty, nothing to save.');
-            }
-          } catch (e) {
-            console.warn('⚠️ create_order: failed to store pendingOrder', e);
-          }
-          // ===== PATCH: save pending order (END) =====
-
-          // Jeśli brakuje pozycji w parsedOrder, spróbuj dopasować pozycje na podstawie menu restauracji z sesji
-          if (!firstGroup || !firstGroup.items || firstGroup.items.length === 0) {
-            let fallbackItems = await parseOrderItems(text, targetRestaurant.id);
-            if (fallbackItems.length) {
-              const total = fallbackItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-              const itemsList = fallbackItems.map(item => `${item.quantity}x ${item.name} (${(item.price * item.quantity).toFixed(2)} zł)`).join(', ');
-              replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
-              updateSession(sessionId, { expectedContext: 'confirm_order', pendingOrder: { restaurant: targetRestaurant, items: fallbackItems, total } });
-              break;
-            }
-
-            // 🔁 Heurystyka awaryjna: dopasuj po słowie kluczowym w nazwie (np. "hawaj")
-            const keyword = normalize(text).replace(/pizza\s*/g, '').split(' ').find(w => w.length >= 4) || '';
-            if (keyword) {
-              const menuForSearch = await getMenuItems(targetRestaurant.id, { includeUnavailable: true });
-              const matched = (menuForSearch || []).filter(m => normalize(m.name).includes(keyword));
-              if (matched.length) {
-                fallbackItems = matched.slice(0,1).map(m => ({ id: m.id, name: m.name, price: Number(m.price_pln)||0, quantity: 1 }));
-                const total = fallbackItems.reduce((s,i)=>s+(i.price*i.quantity),0);
-                const itemsList = fallbackItems.map(i=>`${i.quantity}x ${i.name} (${(i.price*i.quantity).toFixed(2)} zł)`).join(', ');
-                replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
-                updateSession(sessionId, { expectedContext: 'confirm_order', pendingOrder: { restaurant: targetRestaurant, items: fallbackItems, total } });
-                break;
-              }
-            }
-          }
-
-          // Oblicz total
-          const itemsForTotal = firstGroup?.items || [];
-          const total = itemsForTotal.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-
-          // Sformatuj odpowiedź
-          const itemsList = itemsForTotal.map(item =>
-            `${item.quantity}x ${item.name} (${(item.price * item.quantity).toFixed(2)} zł)`
-          ).join(', ');
-
-          replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
-
-          // 🛒 Zapisz pendingOrder w sesji (NIE dodawaj do koszyka od razu!)
-          const pendingOrder = {
-            restaurant: {
-              id: targetRestaurant.id,
-              name: targetRestaurant.name,
-              city: targetRestaurant.city
-            },
-            items: itemsForTotal.map(item => ({
-              id: item.menuItemId,
-              name: item.name,
-              price: item.price,
-              quantity: item.quantity
-            })),
-            total: total
-          };
-
-          // Ustaw expectedContext na 'confirm_order' i zapisz pendingOrder
-          updateSession(sessionId, {
-            expectedContext: 'confirm_order',
-            pendingOrder: pendingOrder
-          });
-
-          console.log('✅ Pending order saved to session:');
-          console.log('   - expectedContext: confirm_order');
-          console.log('   - pendingOrder items count:', pendingOrder.items.length);
-          console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
-          console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
-          console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
-          console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
-          break;
-          }
-
-        // FALLBACK: Stara logika (jeśli parsedOrder nie jest dostępny)
-        // Jeśli w tekście padła nazwa restauracji, spróbuj ją znaleźć
-        let targetRestaurant = null;
-        if (parsed.restaurant) {
-          targetRestaurant = await findRestaurantByName(parsed.restaurant);
-          if (targetRestaurant) {
-            updateSession(sessionId, { lastRestaurant: targetRestaurant });
-            console.log(`✅ Restaurant set from text: ${targetRestaurant.name}`);
-          }
-        }
-
-        // Fallback do lastRestaurant z sesji
-        const current = targetRestaurant || getSession(sessionId)?.lastRestaurant;
-        if (!current) {
-          console.warn('⚠️ No restaurant in context');
-
-          // 🧭 Semantic fallback
-          const fallback = await getLocationFallback(
-            sessionId,
-            prevLocation,
-            `Najpierw wybierz restaurację w {location}:\n{list}\n\nZ której chcesz zamówić?`
-          );
-          if (fallback) {
-            replyCore = fallback;
-            break;
-          }
-
-          replyCore = "Najpierw wybierz restaurację, zanim złożysz zamówienie.";
-          break;
-        }
-
-        // 🛒 Parsuj zamówienie z tekstu (stara funkcja - fallback)
-        const parsedItems = await parseOrderItems(text, current.id);
-
-        if (parsedItems.length === 0) {
-          console.warn('⚠️ No items parsed from text');
-
-          // 🔎 Spróbuj doprecyzować na podstawie słów kluczowych (np. "pizza")
-          const lowerText = normalize(text);
-          const isPizzaRequest = /(pizza|pizze|pizz[ay])/i.test(lowerText);
-
-          if (isPizzaRequest) {
-            // Preferuj pełne pozycje pizzy zamiast dodatków/składników
-            const bannedKeywords = ['sos', 'dodatk', 'extra', 'napoj', 'napój', 'napoje', 'sklad', 'skład', 'fryt', 'ser', 'szynk', 'bekon', 'boczek', 'cebula', 'pomidor', 'czosnek', 'pieczark'];
-            const pizzaNameHints = /(margher|margar|capric|diavol|hawaj|hawai|funghi|prosciut|salami|pepperoni|pepperoni|quattro|formaggi|stagioni|parma|parme|tonno|napolet|napolit|bianca|bufala|wiejsk|vege|wegetar|vegetar|carbonar|calzone|callzone|callzone|call-zone|monte|romana|neapol|neapolita)/i;
-
-            let pizzas = await getMenuItems(current.id, { includeUnavailable: false });
-            if (pizzas?.length) {
-              // Filtruj tylko pizze: po kategorii lub nazwie zawierającej "pizza"
-              pizzas = pizzas
-                .filter(m => {
-                  const n = (m.name || '').toLowerCase();
-                  const c = (m.category || '').toLowerCase();
-                  if (n.length <= 3) return false; // odrzuć bardzo krótkie (np. "ser")
-                  if (bannedKeywords.some(k => n.includes(k))) return false; // odrzuć dodatki
-                  // Kategorie w różnych lokalach: "pizza", "pizze", "pizzeria"
-                  if (c.includes('pizz') || c.includes('pizzeria')) return true;
-                  // Nazwy popularnych pizz bez słowa "pizza"
-                  return n.includes('pizza') || pizzaNameHints.test(n);
-                })
-                .slice(0, 6);
-
-              if (pizzas.length) {
-                const list = pizzas.map(m => m.name).join(', ');
-                replyCore = `Jasne, jaką pizzę z ${current.name} wybierasz? Mam np.: ${list}.`;
-                break;
-              }
-            }
-          }
-
-          // Ogólny fallback: pokaż kilka sensownych pozycji (bez dodatków)
-          const banned = ['sos', 'dodatk', 'extra', 'napoj', 'napój', 'napoje', 'sklad', 'skład', 'ser', 'szynk', 'bekon', 'boczek', 'cebula', 'pomidor', 'czosnek', 'pieczark'];
-          const menu = await getMenuItems(current.id, { includeUnavailable: false });
-
-          const filtered = (menu || [])
-            .filter(m => {
-              const n = (m.name || '').toLowerCase();
-              if (n.length <= 3) return false;
-              return !banned.some(k => n.includes(k));
-            })
-            .slice(0, 6);
-
-          if (filtered.length) {
-            replyCore = `Nie rozpoznałam konkretnego dania. W ${current.name} masz np.: ${filtered.map(m => m.name).join(', ')}. Co wybierasz?`;
-          } else {
-            replyCore = `Nie rozpoznałam dania. Sprawdź menu ${current.name} i spróbuj ponownie.`;
-          }
-          break;
-        }
-
-        // Oblicz total
-        const total = parsedItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-
-        console.log(`✅ Parsed order:`, parsedItems);
-
-        // Sformatuj odpowiedź
-        const itemsList = parsedItems.map(item =>
-          `${item.quantity}x ${item.name} (${(item.price * item.quantity).toFixed(2)} zł)`
-        ).join(', ');
-
-        replyCore = `Rozumiem: ${itemsList}. Razem ${total.toFixed(2)} zł. Dodać do koszyka?`;
-
-        // 🛒 Zapisz pendingOrder w sesji (NIE dodawaj do koszyka od razu!)
-        const pendingOrder = {
-          restaurant: {
-            id: current.id,
-            name: current.name,
-            city: current.city
-          },
-          items: parsedItems,
-          total: total
-        };
-
-        // Ustaw expectedContext na 'confirm_order' i zapisz pendingOrder
-        updateSession(sessionId, {
-          expectedContext: 'confirm_order',
-          pendingOrder: pendingOrder
+        const result = await handleCreateOrder({
+          text,
+          sessionId,
+          prevLocation,
+          parsed,
+          parsedOrder,
+          res,
         });
-
-        console.log('✅ Pending order saved to session (fallback path):');
-        console.log('   - expectedContext: confirm_order');
-        console.log('   - pendingOrder items count:', pendingOrder.items.length);
-        console.log('   - pendingOrder items:', pendingOrder.items.map(i => `${i.quantity}x ${i.name}`).join(', '));
-        console.log('   - total:', pendingOrder.total.toFixed(2), 'zł');
-        console.log('   - items details:', JSON.stringify(pendingOrder.items, null, 2));
-        console.log('⏳ Waiting for user confirmation (expecting "tak", "dodaj", etc.)');
-        break;
-        } catch (error) {
-          console.error('❌ create_order error:', error);
-          replyCore = "Przepraszam, wystąpił błąd przy przetwarzaniu zamówienia. Spróbuj ponownie.";
-          break;
+        if (result?.handled) {
+          return;
         }
+        replyCore = result?.reply || "";
+        meta = { ...meta, ...(result?.meta || {}) };
+        break;
       }
 
       // 🌟 SmartContext v3.1: Recommend (top-rated restaurants)
@@ -1506,6 +1173,7 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
           break;
         }
       }
+    }
     }
 
     // 🔹 Krok 4: Generacja odpowiedzi Amber (stylistyczna)

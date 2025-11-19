@@ -4,11 +4,11 @@ import {
   extractCuisineType,
   findRestaurantsByLocation,
   expandCuisineType,
-  extractLocation,
   calculateDistance,
   groupRestaurantsByCategory,
   getNearbyCityCandidates,
 } from "../locationService.js";
+import { extractLocation } from "../helpers.js";
 import { normalize } from "../orderService.js";
 import { playTTS, stylizeWithGPT4o } from "../../tts.js";
 
@@ -126,14 +126,8 @@ export async function handleFindNearby({
 
         if (includeTTS) {
           try {
-            let styled = reply;
             const SIMPLE_TTS = process.env.TTS_SIMPLE === "true" || process.env.TTS_MODE === "basic";
-            if (!SIMPLE_TTS && process.env.OPENAI_MODEL) {
-              const stylizePromise = stylizeWithGPT4o(reply, "find_nearby").catch(() => reply);
-              const [, ] = await Promise.all([stylizePromise, new Promise((resolve) => setTimeout(resolve, 0))]);
-              styled = await stylizePromise;
-            }
-            const audioContent = await playTTS(styled, {
+            const audioContent = await playTTS(reply, {
               voice: process.env.TTS_VOICE || (SIMPLE_TTS ? "pl-PL-Wavenet-D" : "pl-PL-Chirp3-HD-Erinome"),
               tone: getSession(sessionId)?.tone || "swobodny",
             });
