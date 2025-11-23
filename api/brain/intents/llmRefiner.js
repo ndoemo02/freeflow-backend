@@ -1,6 +1,6 @@
 // api/brain/intents/llmRefiner.js
 import { OpenAI } from "openai";
-import { normalizeText } from "../utils/normalizeText.js";
+import { normalize as normalizeText } from "../utils/normalizeText.js";
 
 const client =
   process.env.OPENAI_API_KEY
