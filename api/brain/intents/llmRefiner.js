@@ -2,21 +2,14 @@
 import { OpenAI } from "openai";
 import { normalizeText } from "../utils/normalizeText.js";
 
-// jeśli brak klucza — moduł działa w trybie awaryjnym (zwraca coarse intent)
 const client =
   process.env.OPENAI_API_KEY
     ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
     : null;
 
-/**
- * refineIntentLLM
- * Precyzuje coarse intent → final JSON intent
- * Zawsze zwraca strukturę zgodną ze schematem
- */
 export async function refineIntentLLM({ text, coarseIntent, session }) {
   const normalized = normalizeText(text || "");
 
-  // tryb awaryjny (np. w dev, test lub brak klucza)
   if (!client) {
     return {
       intent: coarseIntent || "none",
@@ -38,23 +31,18 @@ export async function refineIntentLLM({ text, coarseIntent, session }) {
           role: "system",
           content: `
 Jesteś modułem analizującym intencje użytkownika dla systemu zamawiania jedzenia.
-Twoim zadaniem jest ujednolicenie intencji do precyzyjnej struktury JSON.
-Zwracaj TYLKO JSON — bez wyjaśnień, bez tekstów dodatkowych.
+Zwracaj TYLKO JSON. Bez wyjaśnień.
 
 Dopuszczalne pola:
 {
-  "intent": string,            // find_restaurant, show_menu, add_to_cart, modify_order,
-                               // confirm_order, cancel_order, smalltalk, unknown
+  "intent": string,
   "targetRestaurant": string | null,
   "targetItems": string[] | null,
   "quantity": number | null,
-  "action": string | null,     // add, remove, replace, inquire
+  "action": string | null,
   "confidence": number
 }
-
-Jeśli wypowiedź nie dotyczy jedzenia → intent: "smalltalk".
-Jeśli nie wiesz → intent: "unknown".
-        `,
+`
         },
         {
           role: "user",
@@ -62,18 +50,19 @@ Jeśli nie wiesz → intent: "unknown".
             text: normalized,
             coarseIntent,
             lastRestaurant: session?.lastRestaurant || null,
-            cart: session?.cart || null,
-          }),
-        },
+            cart: session?.cart || null
+          })
+        }
       ],
     });
 
-    const raw = response.choices[0?.].message?.content ?? "{}";
+    const raw = response.choices?.[0]?.message?.content ?? "{}";
 
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch {
+    } catch (e) {
+      console.warn("LLM returned invalid JSON → falling back:", raw);
       parsed = { intent: "unknown" };
     }
 
@@ -85,9 +74,9 @@ Jeśli nie wiesz → intent: "unknown".
       action: parsed.action || null,
       confidence: parsed.confidence ?? 0.6,
     };
+
   } catch (err) {
     console.error("LLM REFINER ERROR:", err);
-
     return {
       intent: "unknown",
       targetRestaurant: null,
