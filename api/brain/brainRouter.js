@@ -1,5 +1,5 @@
 // /api/brain/brainRouter.js
-import { detectIntent, normalizeTxt } from "./intents/intentRouterGlue.js";
+import { detectIntent, normalizeTxt, resolveIntent } from "./intents/intentRouterGlue.js";
 import { supabase } from "../_supabase.js";
 import { getConfig } from "../config/configService.js";
 import { getSession, updateSession } from "./session/sessionStore.js";
@@ -350,10 +350,10 @@ export default async function handler(req, res) {
           lastIntent: currentSession.lastIntent
         } : null
       });
-      
+
       const boostedIntent = boostIntent(text, rawIntent, rawConfidence || 0.5, currentSession);
       intent = boostedIntent;
-      
+
       // --- Alias normalization patch ---
       // Mapuj 'confirm' → 'confirm_order' tylko jeśli oczekujemy potwierdzenia
       if (intent === "confirm" && currentSession?.expectedContext === 'confirm_order') {
@@ -382,7 +382,7 @@ export default async function handler(req, res) {
         }
       }
       console.log(`🔄 Intent alias normalization: ${boostedIntent} → ${intent}`);
-      
+
       // 🧠 [DEBUG] 2C: Intent flow logging - boostIntent result
       console.log('🧠 [DEBUG] boostIntent result:', {
         originalIntent: rawIntent,
@@ -390,11 +390,25 @@ export default async function handler(req, res) {
         changed: rawIntent !== intent,
         changeReason: rawIntent !== intent ? 'boostIntent modified intent' : 'no change'
       });
-      
+
       if (boostedIntent !== rawIntent) {
         console.log(`🌟 SmartContext: intent changed from "${rawIntent}" → "${boostedIntent}"`);
       }
     }
+
+    let refinedIntentData = { intent };
+    try {
+      const refined = await resolveIntent({ text, coarseIntent: intent, session: currentSession });
+      refinedIntentData = refined || { intent };
+    } catch (err) {
+      console.warn('⚠️ resolveIntent failed, using coarse intent', err?.message);
+    }
+
+    intent = refinedIntentData?.intent === 'unknown' ? intent : (refinedIntentData?.intent || intent);
+    const refinedRestaurant = refinedIntentData?.targetRestaurant || restaurant;
+    const refinedTargetItems = refinedIntentData?.targetItems;
+    const refinedAction = refinedIntentData?.action;
+    const refinedQuantity = refinedIntentData?.quantity;
 
     intent = fallbackIntent(text, intent, rawConfidence || 0, currentSession);
 
@@ -406,12 +420,20 @@ export default async function handler(req, res) {
     // NIE czyść expectedContext tutaj - zostanie to zrobione wewnątrz poszczególnych case'ów
     updateSession(sessionId, {
       lastIntent: intent,
-      lastRestaurant: restaurant || prevRestaurant || null,
+      lastRestaurant: refinedRestaurant || restaurant || prevRestaurant || null,
       lastUpdated: Date.now(),
     });
 
     let replyCore = "";
     let meta = {};
+    if (refinedIntentData) {
+      meta.llm_refinement = {
+        targetRestaurant: refinedRestaurant || null,
+        targetItems: refinedTargetItems || null,
+        action: refinedAction || null,
+        quantity: refinedQuantity ?? null,
+      };
+    }
 
     // 🔹 Krok 3: logika wysokopoziomowa
     switch (intent) {
@@ -824,12 +846,14 @@ export default async function handler(req, res) {
 
       case "select_restaurant": {
         console.log('🧠 select_restaurant intent detected');
-        
+
+        const selectedRestaurant = refinedRestaurant || restaurant;
+
         // 🎯 PRIORYTET: Jeśli detectIntent już znalazł restaurację w tekście, użyj jej
-        if (restaurant && restaurant.id) {
-          console.log(`✅ Using restaurant from detectIntent: ${restaurant.name}`);
+        if (selectedRestaurant && selectedRestaurant.id) {
+          console.log(`✅ Using restaurant from detectIntent: ${selectedRestaurant.name}`);
           updateSession(sessionId, {
-            lastRestaurant: restaurant,
+            lastRestaurant: selectedRestaurant,
             expectedContext: null
           });
           // Jeśli użytkownik w tym samym zdaniu prosi o MENU – pokaż menu od razu
@@ -840,7 +864,7 @@ export default async function handler(req, res) {
                 supabase
                   .from("menu_items_v2")
                   .select("id, name, price_pln, available, category")
-                  .eq("restaurant_id", restaurant.id)
+                  .eq("restaurant_id", selectedRestaurant.id)
                   .order("name", { ascending: true })
               );
 
@@ -855,20 +879,20 @@ export default async function handler(req, res) {
               });
               const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
 
-              updateSession(sessionId, { last_menu: shortlist, lastRestaurant: restaurant });
-              replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}. ` +
-                `W ${restaurant.name} dostępne m.in.: ` +
+              updateSession(sessionId, { last_menu: shortlist, lastRestaurant: selectedRestaurant });
+              replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}. ` +
+                `W ${selectedRestaurant.name} dostępne m.in.: ` +
                 shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") +
                 ". Co chciałbyś zamówić?";
               if (IS_TEST) {
-                replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}.`;
+                replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}.`;
               }
             } catch (e) {
               console.warn('⚠️ menu fetch after select failed:', e?.message);
-              replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}.`;
+              replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}.`;
             }
           } else {
-            replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}.`;
+            replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}.`;
             // 🔹 Auto-show menu jeśli nie ma aktywnego zamówienia
             try {
               const sNow = getSession(sessionId) || {};
@@ -878,7 +902,7 @@ export default async function handler(req, res) {
                   supabase
                     .from("menu_items_v2")
                     .select("id, name, price_pln, available, category")
-                    .eq("restaurant_id", restaurant.id)
+                    .eq("restaurant_id", selectedRestaurant.id)
                     .order("name", { ascending: true })
                 );
 
@@ -892,13 +916,13 @@ export default async function handler(req, res) {
                   return true;
                 });
                 const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
-                updateSession(sessionId, { last_menu: shortlist, lastRestaurant: restaurant });
-                replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}. ` +
-                  `W ${restaurant.name} dostępne m.in.: ` +
+                updateSession(sessionId, { last_menu: shortlist, lastRestaurant: selectedRestaurant });
+                replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}. ` +
+                  `W ${selectedRestaurant.name} dostępne m.in.: ` +
                   shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") +
                   ". Co chciałbyś zamówić?";
                 if (IS_TEST) {
-                  replyCore = `Wybrano restaurację ${restaurant.name}${restaurant.city ? ` (${restaurant.city})` : ''}.`;
+                  replyCore = `Wybrano restaurację ${selectedRestaurant.name}${selectedRestaurant.city ? ` (${selectedRestaurant.city})` : ''}.`;
                 }
               }
             } catch (e) {
@@ -1212,10 +1236,10 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
 
           // Wybierz pierwszą grupę (restaurację) z parsed order – z ochroną na brak grup
           let firstGroup = (parsedOrder.groups && parsedOrder.groups.length > 0) ? parsedOrder.groups[0] : null;
-          let targetRestaurant = null;
-          if (firstGroup?.restaurant_name) {
+          let targetRestaurant = refinedRestaurant || null;
+          if (!targetRestaurant && firstGroup?.restaurant_name) {
             targetRestaurant = await findRestaurant(firstGroup.restaurant_name);
-          } else {
+          } else if (!targetRestaurant) {
             // Brak grup w parsedOrder – użyj restauracji z sesji
             const s2 = getSession(sessionId) || {};
             targetRestaurant = s2.lastRestaurant || null;
@@ -1359,8 +1383,8 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
 
         // FALLBACK: Stara logika (jeśli parsedOrder nie jest dostępny)
         // Jeśli w tekście padła nazwa restauracji, spróbuj ją znaleźć
-        let targetRestaurant = null;
-        if (parsed.restaurant) {
+        let targetRestaurant = refinedRestaurant || null;
+        if (!targetRestaurant && parsed.restaurant) {
           targetRestaurant = await findRestaurant(parsed.restaurant);
           if (targetRestaurant) {
             updateSession(sessionId, { lastRestaurant: targetRestaurant });
@@ -1779,7 +1803,7 @@ KONTEKST MIEJSCA:
         return res.status(200).json({
           ok: true,
           intent: intent || "none",
-          restaurant: restaurant || prevRestaurant || null,
+          restaurant: refinedRestaurant || restaurant || prevRestaurant || null,
           reply: null, // 🔇 brak odpowiedzi dla UI
           context: getSession(sessionId),
           timestamp: new Date().toISOString(),
@@ -1800,7 +1824,7 @@ KONTEKST MIEJSCA:
     }
 
     // 🔹 Krok 6: finalna odpowiedź z confidence i fallback
-    const finalRestaurant = currentSession?.lastRestaurant || restaurant || prevRestaurant || null;
+    const finalRestaurant = currentSession?.lastRestaurant || refinedRestaurant || restaurant || prevRestaurant || null;
     const confidence = intent === 'none' ? 0 : (finalRestaurant ? 0.9 : 0.6);
     const fallback = intent === 'none' || !reply;
 
