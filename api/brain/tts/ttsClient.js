@@ -1,4 +1,4 @@
-import { getVertexAccessToken } from "../../utils/googleAuth.js";
+import { getVertexAccessToken } from "../utils/googleAuth.js";
 import OpenAI from "openai";
 import { VertexAI } from "@google-cloud/vertexai";
 import { getConfig } from "../../config/configService.js";
