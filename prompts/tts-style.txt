@@ -7,5 +7,3 @@ Style rules:
 - Keep brand and restaurant names intact.
 - Avoid reading punctuation. Insert short pauses naturally.
 
-
-

@@ -52,13 +52,21 @@ app.use(express.json());
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin) return callback(null, true);
-      if (isAllowedOrigin(origin)) return callback(null, true);
+      // Allow requests without origin (e.g., Postman, curl, same-origin)
+      if (!origin) {
+        console.log('✅ CORS: No origin (same-origin or tool)');
+        return callback(null, true);
+      }
+      // Check if origin is allowed
+      if (isAllowedOrigin(origin)) {
+        return callback(null, true);
+      }
       console.warn("❌ Blocked by CORS:", origin);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
     allowedHeaders: ALLOWED_HEADERS,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   })
 );
 

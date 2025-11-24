@@ -63,5 +63,3 @@ export async function findRestaurantsByLocation(location, cuisineType = null) {
 
 
 
-
-

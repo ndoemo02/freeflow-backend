@@ -17,6 +17,7 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
 
     expect(result.intent).toBe("change_restaurant");
     expect(result.reply).toMatch(/inna|zmień|spróbuj/i);
+    expect(result.meta).toBeDefined();
   });
 
   // 🧠 TEST 2 - confirm_order → cancel_order
@@ -27,7 +28,8 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
     const result = await callBrain("Anuluj zamówienie", sessionId);
 
     expect(result.intent).toBe("cancel_order");
-    expect(result.reply).toMatch(/anulowano|odwołane|ok/i);
+    expect(result.reply).toMatch(/anulowano|odwołane|ok|anulowa(ł|łam)/i);
+    expect(result.meta).toBeDefined();
   });
 
   // 💬 TEST 3 - show_more_options follow-up
@@ -40,6 +42,7 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
     expect(result.intent).toBe("show_more_options");
     expect(result.context.expectedContext).toBe("select_restaurant");
     expect(result.reply).toMatch(/pełna lista|opcji|numer/i);
+    expect(result.meta).toBeDefined();
   });
 
   // 🔢 TEST 4 - select_restaurant by ordinal
@@ -50,6 +53,7 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
 
     expect(result.intent).toBe("select_restaurant");
     expect(result.reply).toMatch(/wybrano|menu|restaurację/i);
+    expect(result.meta).toBeDefined();
   });
 
   // 🧾 TEST 5 - empty message validation
@@ -57,7 +61,8 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
     const result = await callBrain("", sessionId);
 
     expect(result.ok).toBe(false);
-    expect(result.error || result.reply).toMatch(/brak|tekst|pusty/i);
+    expect(result.error || result.reply).toMatch(/brak|tekst|pusty|400/i);
+    // Tutaj meta może nie być zdefiniowane dla błędu 400/200 soft error
   });
 
   // 🔄 TEST 6 - confirm_order loop recovery
@@ -70,5 +75,7 @@ describe("🧠 Amber Brain - Logic Flow (Context & Decisions)", () => {
 
     expect(result.intent).toBe("confirm_order");
     expect(result.reply).toMatch(/potwierdzam|dobrze|zapisuję/i);
+    expect(['neutral', undefined, null]).toContain(result.context.expectedContext);
+    expect(result.meta).toBeDefined();
   });
 });

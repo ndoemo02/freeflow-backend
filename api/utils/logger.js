@@ -21,5 +21,3 @@ export function getLastLogs(limit = 50) {
 }
 
 
-
-
