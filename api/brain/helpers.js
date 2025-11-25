@@ -166,6 +166,12 @@ export function extractSize(text = '') {
 // ============================================================================
 
 export function extractLocation(text) {
+  // 🆕 PRIORITY: Jeśli tekst zaczyna się od "Restauracja", traktuj jako nazwę, NIE lokalizację
+  if (/^restauracja\s+/i.test(text.trim())) {
+    console.log('🆕 Text starts with "Restauracja" - skipping location extraction');
+    return null;
+  }
+  
   const locationKeywords = ['w', 'na', 'blisko', 'koło', 'niedaleko', 'obok', 'przy'];
   const pattern = new RegExp(`(?:${locationKeywords.join('|')})\\s+([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)*)`, 'i');
   const match = text.match(pattern);
@@ -176,11 +182,18 @@ export function extractLocation(text) {
     location = match[1]?.trim();
   } else {
     // Fallback: Spróbuj wyłapać miasto bez przedimka (np. "Piekary Śląskie")
+    // ALE: ignoruj jeśli to część nazwy restauracji
     const cityPattern = /\b([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)*)\b/g;
     const cities = text.match(cityPattern);
     if (cities && cities.length > 0) {
-      // Weź ostatnie słowo z dużej litery (najprawdopodobniej miasto)
-      location = cities[cities.length - 1];
+      // Filtruj słowa, które są częścią nazwy restauracji
+      const restaurantNameIndicators = ['Restauracja', 'Bar', 'Pizzeria', 'Bistro', 'Kawiarnia', 'Pub', 'Lokal'];
+      const filteredCities = cities.filter(city => !restaurantNameIndicators.includes(city));
+      
+      if (filteredCities.length > 0) {
+        // Weź ostatnie słowo z dużej litery (najprawdopodobniej miasto)
+        location = filteredCities[filteredCities.length - 1];
+      }
     }
   }
   
