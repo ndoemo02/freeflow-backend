@@ -614,8 +614,34 @@ export default async function handler(req, res) {
           }
 
           // Jeśli nadal brak wyników – wyraźnie zakomunikuj brak w mieście i okolicy
+          // + graceful degradation: zaproponuj alternatywy
           if (!restaurants) {
-            replyCore = `Nie znalazłam restauracji w ${location} ani w okolicy.`;
+            // Pobierz listę dostępnych miast z restauracjami
+            const { data: availableCities } = await withDb(
+              supabase
+                .from("restaurants")
+                .select("city")
+                .not("city", "is", null)
+                .limit(100)
+            );
+            
+            if (availableCities && availableCities.length > 0) {
+              // Wyciągnij unikalne miasta i posortuj alfabetycznie
+              const uniqueCities = [...new Set(availableCities.map(r => r.city))]
+                .filter(Boolean)
+                .sort();
+              
+              // Pokaż top 5 miast
+              const topCities = uniqueCities.slice(0, 5);
+              
+              replyCore = `Nie znalazłam restauracji w ${location} ani w okolicy. ` +
+                `Mogę sprawdzić dla Ciebie w: ${topCities.join(", ")}. ` +
+                `Które miasto Cię interesuje?`;
+            } else {
+              // Fallback jeśli nie ma żadnych miast w bazie
+              replyCore = `Nie znalazłam restauracji w ${location} ani w okolicy. ` +
+                `Spróbuj podać inną lokalizację lub powiedz "w pobliżu".`;
+            }
             break;
           }
         }
