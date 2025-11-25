@@ -966,9 +966,44 @@ export default async function handler(req, res) {
         }
 
         // 3) Fallback: jeśli brak numeru, spróbuj dopasować po nazwie
+        // NAJPIERW: Szukaj w kontekstowej liście restauracji (fuzzy matching)
+        if (!chosen && parsed.restaurant) {
+          const userInput = parsed.restaurant;
+          console.log(`🔍 Trying to match "${userInput}" against ${list.length} restaurants in context`);
+          
+          // Import fuzzyIncludes from helpers
+          const { fuzzyIncludes } = await import('./helpers.js');
+          
+          // Próba 1: Exact match (case-insensitive)
+          const exactMatch = list.find(r => 
+            normalizeTxt(r.name).includes(normalizeTxt(userInput)) ||
+            normalizeTxt(userInput).includes(normalizeTxt(r.name))
+          );
+          
+          if (exactMatch) {
+            console.log(`✅ Exact match found: ${exactMatch.name}`);
+            chosen = exactMatch;
+          } else {
+            // Próba 2: Fuzzy matching dla każdej restauracji z listy
+            const fuzzyMatches = list.filter(r => fuzzyIncludes(r.name, userInput));
+            
+            if (fuzzyMatches.length === 1) {
+              console.log(`✅ Fuzzy match found: ${fuzzyMatches[0].name}`);
+              chosen = fuzzyMatches[0];
+            } else if (fuzzyMatches.length > 1) {
+              console.log(`⚠️ Multiple fuzzy matches found: ${fuzzyMatches.map(r => r.name).join(', ')}`);
+              // Wybierz najlepsze dopasowanie (najkrótszą nazwę lub pierwszą)
+              chosen = fuzzyMatches.sort((a, b) => a.name.length - b.name.length)[0];
+              console.log(`✅ Selected best match: ${chosen.name}`);
+            }
+          }
+        }
+        
+        // 4) Fallback globalny: jeśli nadal brak dopasowania i nazwa > 5 znaków, szukaj w całej bazie
         // ALE NIE dla pojedynczych słów jak "burger" - tylko pełne nazwy restauracji
         if (!chosen && parsed.restaurant && parsed.restaurant.length > 5) {
           const name = parsed.restaurant;
+          console.log(`🌐 No context match, trying global search for: ${name}`);
           chosen = await findRestaurant(name);
         }
 
