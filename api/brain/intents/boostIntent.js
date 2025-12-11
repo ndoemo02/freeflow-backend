@@ -5,6 +5,31 @@ export function boostIntent(text, intent, confidence = 0, session = null) {
   if (!text) return intent;
   const lower = normalizeTxt(text); // używamy normalizeTxt z intent-router (stripuje diacritics)
   const ctx = session || {};
+  const expected = session?.expectedContext;
+
+  // === SMART CONFIRMATION HANDLER ===
+  // Jeśli bot oczekuje "show_menu", to każda odpowiedź typu
+  // "tak", "pokaż", "chętnie", "zobaczę", "z przyjemnością"
+  // powinna zostać zmapowana na intent: "show_menu".
+  if (expected === "show_menu") {
+    if (
+      lower.includes("tak") ||
+      lower.includes("pewnie") ||
+      lower.includes("jasne") ||
+      lower.includes("poproszę") ||
+      lower.includes("chętnie") ||
+      lower.includes("z przyjemnością") ||
+      lower.includes("pokaż") ||
+      lower.includes("zobaczę") ||
+      lower.includes("zobacz")
+    ) {
+      return {
+        intent: "show_menu",
+        confidence: 0.99,
+        fromExpected: true,
+      };
+    }
+  }
 
   // --- Fast intent detection (no model delay) ---
   const fastNegCancel = /\b(anuluj|odwołaj|odwolaj|rezygnuj)\b/i;

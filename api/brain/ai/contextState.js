@@ -5,7 +5,9 @@ export function getDefault() {
         expectedContext: "neutral",
         lastIntent: null,
         lastRestaurant: null,
-        lastRestaurantsList: [],
+        lastRestaurantsList: [], // Legacy field
+        lastRestaurants: [],     // New structured field: { id, name, index, city, cuisine }
+        lastRestaurantsTimestamp: null,
         lastMenu: [],
         locationOverride: null,
         history: []

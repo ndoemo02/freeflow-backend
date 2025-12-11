@@ -2,7 +2,7 @@
 // Specjalizowane testy dla expectedContext flow
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { boostIntent } from '../brainRouter.js';
+import { boostIntent } from '../intents/boostIntent.js';
 import { updateSession, getSession } from '../context.js';
 
 describe('🧠 ExpectedContext Flow Tests', () => {
@@ -173,7 +173,7 @@ describe('🧠 ExpectedContext Flow Tests', () => {
   describe('🧪 Session State Tests', () => {
     it('should preserve session state during expectedContext flow', () => {
       const sessionId = 'test-session';
-      
+
       // Ustaw początkową sesję
       updateSession(sessionId, {
         lastIntent: 'find_nearby',
@@ -191,7 +191,7 @@ describe('🧠 ExpectedContext Flow Tests', () => {
       });
 
       const session = getSession(sessionId);
-      
+
       // Sprawdź czy dane zostały zachowane
       expect(session.lastIntent).toBe('find_nearby');
       expect(session.lastRestaurant.name).toBe('Original Restaurant');
@@ -202,7 +202,7 @@ describe('🧠 ExpectedContext Flow Tests', () => {
 
     it('should clear expectedContext after handling', () => {
       const sessionId = 'test-session';
-      
+
       // Ustaw expectedContext
       updateSession(sessionId, {
         expectedContext: 'confirm_order',

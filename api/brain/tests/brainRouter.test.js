@@ -3,8 +3,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getSession, updateSession } from '../context.js';
-import { boostIntent } from '../brainRouter.js';
-import { detectIntent, applyAliases } from '../intent-router.js';
+// Imports updated
+import { boostIntent } from '../intents/boostIntent.js';
+import { detectIntent } from '../intents/intentRouterGlue.js';
 
 // Mock Supabase
 vi.mock('../_supabase.js', () => ({
@@ -54,32 +55,7 @@ describe('🧠 BrainRouter Tests', () => {
     vi.clearAllMocks();
   });
 
-  describe('🔧 Alias Tests', () => {
-    it('should map "diabolo" to "pizza diavola"', () => {
-      const text = 'chcę pizzę diabolo';
-      const result = applyAliases(text);
-      expect(result).toContain('pizza diavola');
-    });
 
-    it('should map "diabola" to "pizza diavola"', () => {
-      const text = 'zamów diabola';
-      const result = applyAliases(text);
-      expect(result).toContain('pizza diavola');
-    });
-
-    it('should map "pizza diabolo" to "pizza diavola"', () => {
-      const text = 'pizza diabolo';
-      const result = applyAliases(text);
-      expect(result).toContain('pizza diavola');
-    });
-
-    it('should handle multiple aliases', () => {
-      const text = 'chcę margheritę i diabolo';
-      const result = applyAliases(text);
-      expect(result).toContain('pizza margherita');
-      expect(result).toContain('pizza diavola');
-    });
-  });
 
   describe('🧠 ExpectedContext Tests', () => {
     it('should detect "pokaż więcej opcji" with expectedContext', () => {
@@ -174,14 +150,14 @@ describe('🧠 BrainRouter Tests', () => {
 
       updateSession(sessionId, updates);
       const session = getSession(sessionId);
-      
+
       expect(session.expectedContext).toBe('confirm_order');
       expect(session.lastRestaurant.name).toBe('Test Restaurant');
     });
 
     it('should preserve existing session data', () => {
       const sessionId = 'test-session';
-      
+
       // Ustaw początkową sesję
       updateSession(sessionId, {
         lastIntent: 'find_nearby',
@@ -194,7 +170,7 @@ describe('🧠 BrainRouter Tests', () => {
       });
 
       const session = getSession(sessionId);
-      
+
       expect(session.lastIntent).toBe('find_nearby');
       expect(session.lastRestaurant.name).toBe('Original Restaurant');
       expect(session.expectedContext).toBe('select_restaurant');

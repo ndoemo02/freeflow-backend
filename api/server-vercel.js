@@ -101,21 +101,21 @@ app.get('/api/brain', (req, res) => {
   res.status(405).json({ ok: false, error: 'method_not_allowed' });
 });
 
-    // Optional: reset session endpoint
-    app.post("/api/brain/reset", async (req, res) => {
-      try {
-        const { getSession } = await import("./brain/context.js");
-        const { updateSession } = await import("./brain/context.js");
-        const body = req.body || {};
-        const sessionId = body.sessionId;
-        if (!sessionId) return res.status(400).json({ ok: false, error: 'missing_sessionId' });
-        updateSession(sessionId, { expectedContext: null, lastRestaurant: null, pendingOrder: null, last_restaurants_list: null });
-        res.json({ ok: true, cleared: true, session: getSession(sessionId) });
-      } catch (e) {
-        console.error('reset error', e);
-        res.status(500).json({ ok: false, error: e.message });
-      }
-    });
+// Optional: reset session endpoint
+app.post("/api/brain/reset", async (req, res) => {
+  try {
+    const { getSession } = await import("./brain/context.js");
+    const { updateSession } = await import("./brain/context.js");
+    const body = req.body || {};
+    const sessionId = body.sessionId;
+    if (!sessionId) return res.status(400).json({ ok: false, error: 'missing_sessionId' });
+    updateSession(sessionId, { expectedContext: null, lastRestaurant: null, pendingOrder: null, last_restaurants_list: null });
+    res.json({ ok: true, cleared: true, session: getSession(sessionId) });
+  } catch (e) {
+    console.error('reset error', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 app.post("/api/brain/router", async (req, res) => {
   try {
@@ -243,6 +243,11 @@ app.get('/api/admin/amber/export', async (req, res) => {
   catch (err) { res.status(500).send('error: ' + err.message); }
 });
 
+app.get('/api/admin/brain-logs', async (req, res) => {
+  try { const mod = await import('./admin/brain-logs.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // === FREEFUN ENDPOINTS ===
 app.get('/api/freefun/list', async (req, res) => {
   try { const mod = await import('./freefun/list.js'); return mod.default(req, res); }
@@ -260,14 +265,14 @@ app.get('/api/admin/orders/stats', async (req, res) => {
     try {
       const { data, error } = await supabase.rpc('get_order_stats');
       if (!error && data) return res.status(200).json({ ok: true, stats: data });
-    } catch {}
+    } catch { }
 
     // Fallback: compute with aggregations (snake_case friendly)
     let totalOrders = 0;
     try {
       const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true });
       totalOrders = count || 0;
-    } catch {}
+    } catch { }
 
     let totalRevenue = 0;
     try {
@@ -282,7 +287,7 @@ app.get('/api/admin/orders/stats', async (req, res) => {
           if (!isNaN(v)) totalRevenue = v / 100;
         }
       }
-    } catch {}
+    } catch { }
 
     return res.status(200).json({ ok: true, stats: { total_orders: totalOrders, total_revenue: totalRevenue } });
   } catch (err) {
@@ -409,7 +414,7 @@ app.get('/api/amber/live', async (req, res) => {
           };
           res.write(`data: ${JSON.stringify(payload)}\n\n`);
         }
-      } catch {}
+      } catch { }
     };
 
     const timer = setInterval(push, 2000);
