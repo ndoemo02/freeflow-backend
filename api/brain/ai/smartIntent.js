@@ -1,88 +1,79 @@
 
 import { detectIntent } from "../intents/intentRouterGlue.js";
-import { logIssue } from "../utils/intentLogger.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 /**
- * Smart Intent Layer - Intelligent Dispatcher
- * 1. Tries Classic NLU (RegEx/Keywords)
- * 2. If ambiguous, calls LLM (GPT-4o-mini)
- * 3. Returns structured intent with slots
+ * Smart Intent Resolution Layer
+ * Simplifies logic: Check Classic -> Check Context/Confidence -> LLM Fallback
  */
 export async function smartResolveIntent({ text, session, restaurants, previousIntent }) {
-    // Guard empty input
+    // 1. Guard empty input
     if (!text || !text.trim()) {
-        return { intent: "unknown", confidence: 0, reason: "empty_input" };
+        return { intent: "smalltalk", confidence: 0, slots: {}, source: 'empty' };
     }
 
-    const startTotal = Date.now();
     const sessionId = session?.sessionId || 'default';
 
-    // 1. Classic NLU
-    let classicResult = { intent: 'unknown', confidence: 0, slots: {} };
+    // 2. Classic NLU
+    let det = { intent: 'unknown', confidence: 0, slots: {} };
     try {
-        const det = await detectIntent(text, sessionId);
-        classicResult = {
-            ...det, // Pass through everything (restaurant, parsedOrder, etc.)
-            intent: det.intent || 'unknown',
-            confidence: det.confidence || 0,
-            slots: det.entities || {},
-            source: 'classic'
-        };
+        det = await detectIntent(text, sessionId);
     } catch (e) {
-        console.warn('⚠️ Classic NLU failed, falling back:', e.message);
-        // Fallback to minimal known state if NLU crashes
-        return { intent: 'unknown', confidence: 0, source: 'classic_error' };
+        console.warn('⚠️ Classic NLU failed:', e.message);
     }
 
-    // 1a. High confidence classic short-circuit
-    const USE_LLM = process.env.USE_LLM_INTENT === 'true';
-    const CLASSIC_THRESHOLD = 0.85;
+    const classicResult = {
+        ...det,
+        intent: det.intent || 'unknown',
+        confidence: det.confidence || 0,
+        slots: det.entities || {},
+        source: 'classic'
+    };
 
-    if (!USE_LLM) {
+    // 3. Fast-track (Skip LLM)
+    // Jeśli mamy expectedContext LUB wysokie confidence (> 0.75)
+    // Wyjątek: jeśli classic zwrócił 'none'/'unknown' i nie ma expectedContext, to nie jest "high confidence" w sensie użyteczności.
+    // Ale user mówi: "det.intent ma wysokie confidence".
+
+    // Check strict context existence
+    const hasExpectedContext = !!session?.expectedContext;
+
+    // Confidence check
+    const isConfident = (classicResult.confidence >= 0.75) &&
+        (classicResult.intent !== 'none') &&
+        (classicResult.intent !== 'unknown') &&
+        (classicResult.intent !== 'fallback');
+
+    if (hasExpectedContext || isConfident) {
+        // Log decision
+        // console.log(`🧠 [SmartIntent] Skipping LLM (Ctx: ${hasExpectedContext}, Conf: ${classicResult.confidence.toFixed(2)})`);
         return classicResult;
     }
 
-    // Skip LLM if classic is super confident (and not simple fallback)
-    if (
-        classicResult.confidence >= CLASSIC_THRESHOLD &&
-        classicResult.intent !== 'none' &&
-        classicResult.intent !== 'unknown' &&
-        classicResult.intent !== 'fallback'
-    ) {
-        logIntentResolution(text, classicResult, null, 'classic');
-        return classicResult;
-    }
+    // 4. LLM Fallback
+    const USE_LLM = process.env.USE_LLM_INTENT === 'true' || process.env.OPENAI_API_KEY;
+    if (!USE_LLM) return classicResult;
 
-    // 2. LLM Resolution
-    let llmResult = null;
     try {
         const contextData = {
             lastIntent: previousIntent || 'none',
             lastRestaurant: session?.lastRestaurant?.name || null,
-            city: session?.last_location || null,
-            visibleRestaurants: (restaurants || []).map(r => r.name).slice(0, 5)
+            city: session?.last_location || null
         };
 
-        const systemPrompt = `You are the FreeFlow Intent Master.
-Analyze user text and return JSON:
-{
-  "intent": "create_order | show_menu | find_nearby | change_restaurant | confirm_order | cancel_order | smalltalk | unknown",
-  "confidence": 0.0-1.0,
-  "slots": {
-    "restaurantName": "string or null",
-    "city": "string or null",
-    "items": [{"name": "string", "quantity": number, "extras": []}]
-  },
-  "reason": "short logic summary"
-}
+        const systemPrompt = `Analyze user text and return JSON.
+Target Intents: [create_order, show_menu, find_nearby, change_restaurant, confirm_order, cancel_order, smalltalk, unknown].
+
 Rules:
 - If user wants food/drink -> create_order (extract items)
 - If user asks for location/places -> find_nearby
-- If user changes preference ('wolałbym pizza', 'jednak kebab', 'wolę burgera') -> find_nearby (with cuisine in slots)
+- If user changes preference ('wolałbym pizza', 'jednak kebab') -> find_nearby (with cuisine)
 - If user picks a place -> show_menu or confirm selection
-context: ${JSON.stringify(contextData)}`;
+- If ambiguous -> unknown
+
+Return JSON: { "intent": "string", "confidence": number, "slots": object }
+Context: ${JSON.stringify(contextData)}`;
 
         const response = await fetch(OPENAI_URL, {
             method: "POST",
@@ -91,7 +82,7 @@ context: ${JSON.stringify(contextData)}`;
                 "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
             },
             body: JSON.stringify({
-                model: "gpt-4o-mini",
+                model: "gpt-4o-mini", // Fast model
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: `User: "${text}"` }
@@ -106,50 +97,21 @@ context: ${JSON.stringify(contextData)}`;
             const content = json.choices?.[0]?.message?.content;
             if (content) {
                 const parsed = JSON.parse(content);
-                llmResult = {
-                    intent: parsed.intent || 'unknown',
-                    confidence: parsed.confidence || 0,
-                    slots: parsed.slots || {},
-                    reason: parsed.reason,
-                    source: 'llm'
-                };
+                // 5. Merge / Refine
+                if (parsed.intent && parsed.intent !== 'unknown') {
+                    return {
+                        ...classicResult, // Preserve classic raw data
+                        intent: parsed.intent,
+                        confidence: parsed.confidence || 0.85,
+                        slots: { ...classicResult.slots, ...(parsed.slots || {}) },
+                        source: 'llm'
+                    };
+                }
             }
         }
     } catch (err) {
-        console.warn('⚠️ SmartIntent LLM failed:', err.message);
+        console.warn('⚠️ SmartIntent LLM error:', err.message);
     }
 
-    // 3. Hybrid Decision
-    let finalResult = classicResult;
-    let source = 'classic';
-
-    if (llmResult) {
-        // If LLM is very confident, or classic is very weak
-        if (llmResult.confidence > (classicResult.confidence + 0.1)) {
-            finalResult = llmResult;
-            source = 'llm';
-        } else if (classicResult.intent === 'unknown' || classicResult.intent === 'none') {
-            finalResult = llmResult;
-            source = 'llm';
-        }
-    }
-
-    finalResult.source = source;
-
-    // Log telemetry
-    logIntentResolution(text, classicResult, llmResult, source);
-
-    return finalResult;
-}
-
-function logIntentResolution(text, classic, llm, chosenSource) {
-    // Simple console logger as requested
-    console.log(`🧠 [SmartIntent] "${text}" -> ${chosenSource.toUpperCase()}`);
-    console.log(`   🔸 Classic: ${classic?.intent} (${classic?.confidence?.toFixed(2)})`);
-    if (llm) {
-        console.log(`   🔹 LLM:     ${llm?.intent} (${llm?.confidence?.toFixed(2)})`);
-        if (llm.slots && Object.keys(llm.slots).length) {
-            console.log(`      Slots:   ${JSON.stringify(llm.slots)}`);
-        }
-    }
+    return classicResult;
 }

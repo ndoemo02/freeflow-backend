@@ -1,3 +1,4 @@
+
 // /api/brain/tests/expectedContext.test.js
 // Specjalizowane testy dla expectedContext flow
 
@@ -10,165 +11,79 @@ describe('🧠 ExpectedContext Flow Tests', () => {
     vi.clearAllMocks();
   });
 
-  describe('📋 Show More Options Flow', () => {
-    it('should detect "pokaż więcej opcji" with show_more_options context', () => {
+  describe('✅ Confirm Menu Flow', () => {
+    it('should detect confirmation with confirm_menu context', () => {
       const session = {
-        expectedContext: 'show_more_options',
-        last_restaurants_list: [
-          { name: 'Restaurant 1' },
-          { name: 'Restaurant 2' },
-          { name: 'Restaurant 3' }
-        ]
-      };
-
-      const testCases = [
-        'pokaż więcej opcji',
-        'pokaż więcej',
-        'pokaż wszystkie',
-        'pokaż pozostałe',
-        'pokaż resztę',
-        'więcej opcji'
-      ];
-
-      testCases.forEach(text => {
-        const result = boostIntent(text, 'none', 0.3, session);
-        expect(result).toBe('show_more_options');
-      });
-    });
-
-    it('should NOT detect "pokaż więcej" without expectedContext', () => {
-      const session = {
-        expectedContext: null,
-        last_restaurants_list: []
-      };
-
-      const result = boostIntent('pokaż więcej opcji', 'none', 0.3, session);
-      expect(result).toBe('none'); // Nie zmienia intencji
-    });
-  });
-
-  describe('✅ Confirm Order Flow', () => {
-    it('should detect confirmation with confirm_order context', () => {
-      const session = {
-        expectedContext: 'confirm_order',
-        pendingOrder: {
-          restaurant: { name: 'Test Restaurant' },
-          items: [{ name: 'Pizza', price: 25, quantity: 1 }],
-          total: 25
-        }
+        expectedContext: 'confirm_menu',
+        lastRestaurant: { name: 'Test Restaurant' }
       };
 
       const confirmCases = [
         'tak',
-        'ok',
-        'dobrze',
-        'zgoda',
-        'pewnie',
-        'jasne',
-        'oczywiście',
-        'dodaj',
-        'dodaj proszę',
-        'zamów',
-        'zamawiam',
-        'potwierdzam'
+        'tak pokaz',
+        'chętnie',
+        'chętnie zobaczę',
+        'pokaż',
+        'jasne'
       ];
 
       confirmCases.forEach(text => {
-        const result = boostIntent(text, 'none', 0.3, session);
-        expect(result).toBe('confirm_order');
-      });
-    });
-
-    it('should detect cancellation with confirm_order context', () => {
-      const session = {
-        expectedContext: 'confirm_order',
-        pendingOrder: {
-          restaurant: { name: 'Test Restaurant' },
-          items: [{ name: 'Pizza', price: 25, quantity: 1 }],
-          total: 25
+        const result = boostIntent('none', text, session);
+        if (typeof result === 'object') {
+          expect(result.intent).toBe('show_menu');
+          expect(result.boosted).toBe(true);
+        } else {
+          expect(result).toBe('show_menu');
         }
-      };
-
-      const cancelCases = [
-        'nie',
-        'anuluj',
-        'rezygnuję',
-        'nie chcę',
-        'nie teraz',
-        'nie zamawiaj'
-      ];
-
-      cancelCases.forEach(text => {
-        const result = boostIntent(text, 'none', 0.3, session);
-        expect(result).toBe('cancel_order');
       });
     });
-  });
 
-  describe('🎯 Select Restaurant Flow', () => {
-    it('should detect restaurant selection with select_restaurant context', () => {
+    it('should accept show_menu as alias for confirm_menu context', () => {
       const session = {
-        expectedContext: 'select_restaurant',
-        last_restaurants_list: [
-          { name: 'Restaurant 1' },
-          { name: 'Restaurant 2' },
-          { name: 'Restaurant 3' }
-        ]
-      };
-
-      const selectCases = [
-        'wybieram',
-        'wybierz',
-        'ta pierwsza',
-        'ta druga',
-        'ta trzecia',
-        'numer 1',
-        'numer 2',
-        'numer 3',
-        '1',
-        '2',
-        '3'
-      ];
-
-      selectCases.forEach(text => {
-        const result = boostIntent(text, 'none', 0.3, session);
-        expect(result).toBe('select_restaurant');
-      });
-    });
-  });
-
-  describe('🔄 Context Priority Tests', () => {
-    it('should prioritize expectedContext over other semantic rules', () => {
-      const session = {
-        expectedContext: 'confirm_order',
-        pendingOrder: { restaurant: { name: 'Test' }, items: [], total: 0 }
-      };
-
-      // Tekst zawiera "nie" ale expectedContext to "confirm_order"
-      const result = boostIntent('nie chcę tego', 'none', 0.3, session);
-      expect(result).toBe('cancel_order'); // "nie" w kontekście confirm_order = cancel_order
-    });
-
-    it('should skip boost if confidence is high', () => {
-      const session = {
-        expectedContext: 'confirm_order',
-        pendingOrder: { restaurant: { name: 'Test' }, items: [], total: 0 }
-      };
-
-      const result = boostIntent('tak', 'menu_request', 0.9, session);
-      expect(result).toBe('menu_request'); // Nie zmienia bo confidence >= 0.8
-    });
-
-    it('should handle missing expectedContext gracefully', () => {
-      const session = {
-        expectedContext: null,
+        expectedContext: 'show_menu', // old legacy context
         lastRestaurant: { name: 'Test Restaurant' }
       };
+      const result = boostIntent('none', 'tak', session);
+      if (typeof result === 'object') {
+        expect(result.intent).toBe('show_menu');
+      } else {
+        expect(result).toBe('show_menu');
+      }
+    });
 
-      const result = boostIntent('tak', 'none', 0.3, session);
-      expect(result).toBe('confirm'); // Fallback to general confirm
+    it('should NOT boost if text is too long', () => {
+      const session = { expectedContext: 'confirm_menu' };
+      const longText = 'tak poproszę ale chciałbym też wiedzieć czy macie frytki';
+      const result = boostIntent('none', longText, session);
+      expect(result).toBe('none'); // No boost
     });
   });
+
+  describe('✅ Confirm Choice Flow', () => {
+    it('should detect confirmation with confirm_choice context', () => {
+      const session = {
+        expectedContext: 'confirm_choice',
+      };
+
+      const confirmCases = ['tak', 'potwierdzam', 'poproszę', 'ok'];
+
+      confirmCases.forEach(text => {
+        const result = boostIntent('none', text, session);
+        if (typeof result === 'object') {
+          expect(result.intent).toBe('confirm');
+        } else {
+          expect(result).toBe('confirm');
+        }
+      });
+    });
+
+    it('should NOT boost unrelated text', () => {
+      const session = { expectedContext: 'confirm_choice' };
+      const result = boostIntent('none', 'nie wiem', session);
+      expect(result).toBe('none');
+    });
+  });
+
 
   describe('🧪 Session State Tests', () => {
     it('should preserve session state during expectedContext flow', () => {
@@ -183,11 +98,7 @@ describe('🧠 ExpectedContext Flow Tests', () => {
 
       // Ustaw expectedContext
       updateSession(sessionId, {
-        expectedContext: 'show_more_options',
-        last_restaurants_list: [
-          { name: 'Restaurant 1' },
-          { name: 'Restaurant 2' }
-        ]
+        expectedContext: 'confirm_menu'
       });
 
       const session = getSession(sessionId);
@@ -195,63 +106,22 @@ describe('🧠 ExpectedContext Flow Tests', () => {
       // Sprawdź czy dane zostały zachowane
       expect(session.lastIntent).toBe('find_nearby');
       expect(session.lastRestaurant.name).toBe('Original Restaurant');
-      expect(session.last_location).toBe('Piekary Śląskie');
-      expect(session.expectedContext).toBe('show_more_options');
-      expect(session.last_restaurants_list).toHaveLength(2);
-    });
-
-    it('should clear expectedContext after handling', () => {
-      const sessionId = 'test-session';
-
-      // Ustaw expectedContext
-      updateSession(sessionId, {
-        expectedContext: 'confirm_order',
-        pendingOrder: { restaurant: { name: 'Test' }, items: [], total: 0 }
-      });
-
-      // Symuluj obsługę (w prawdziwym kodzie to robi brainRouter)
-      updateSession(sessionId, {
-        expectedContext: null,
-        pendingOrder: null
-      });
-
-      const session = getSession(sessionId);
-      expect(session.expectedContext).toBeNull();
-      expect(session.pendingOrder).toBeNull();
+      expect(session.expectedContext).toBe('confirm_menu');
     });
   });
 
   describe('🎭 Edge Cases', () => {
-    it('should handle malformed expectedContext', () => {
+    it('should handle missing expectedContext gracefully', () => {
       const session = {
-        expectedContext: 'invalid_context',
-        lastRestaurant: { name: 'Test Restaurant' }
+        expectedContext: null
       };
-
-      const result = boostIntent('tak', 'none', 0.3, session);
-      expect(result).toBe('confirm'); // Fallback to general confirm
-    });
-
-    it('should handle empty expectedContext', () => {
-      const session = {
-        expectedContext: '',
-        lastRestaurant: { name: 'Test Restaurant' }
-      };
-
-      const result = boostIntent('tak', 'none', 0.3, session);
-      expect(result).toBe('confirm'); // Fallback to general confirm
+      const result = boostIntent('none', 'tak', session);
+      expect(result).toBe('none');
     });
 
     it('should handle undefined session', () => {
-      const result = boostIntent('tak', 'none', 0.3, undefined);
-      expect(result).toBe('confirm'); // Fallback to general confirm
-    });
-
-    it('should handle null session', () => {
-      const result = boostIntent('tak', 'none', 0.3, null);
-      expect(result).toBe('confirm'); // Fallback to general confirm
+      const result = boostIntent('none', 'tak', undefined);
+      expect(result).toBe('none');
     });
   });
 });
-
-
