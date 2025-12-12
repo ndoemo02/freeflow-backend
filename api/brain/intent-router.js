@@ -18,6 +18,13 @@ import {
 // Re-export for compatibility
 export { normalize, stripDiacritics, normalizeTxt, extractQuantity, extractSize };
 
+// Import functional intent detector (ETAP 1)
+import { 
+  detectFunctionalIntent, 
+  FUNCTIONAL_INTENTS,
+  isFunctionalIntent 
+} from './intents/functionalIntentDetector.js';
+
 let aliasCache = { value: {}, ts: 0 };
 async function getAliasMapCached() {
   const now = Date.now();
@@ -167,41 +174,102 @@ const NAME_ALIASES = {
   'godzil': 'głodzilla',
 };
 
+/**
+ * Deterministyczna mapa aliasów (zgodnie z wymaganiami)
+ * Jeśli alias nie znaleziony → zwraca unknown_item, nie failuje
+ */
+const DETERMINISTIC_ALIAS_MAP = {
+  // Napoje
+  'cola': 'coca-cola',
+  'pepsi max': 'pepsi-max',
+  'pepsi': 'pepsi',
+  
+  // Frytki
+  'frytki': 'fries',
+  'małe frytki': 'fries_small',
+  'duże frytki': 'fries_large',
+  
+  // Pizza (zachowane z NAME_ALIASES dla kompatybilności)
+  'margherita': 'pizza margherita',
+  'margherite': 'pizza margherita',
+  'margerita': 'pizza margherita',
+  'margarita': 'pizza margherita',
+  'pepperoni': 'pizza pepperoni',
+  'hawajska': 'pizza hawajska',
+  'diavola': 'pizza diavola',
+  'diabolo': 'pizza diavola',
+  'diabola': 'pizza diavola',
+  
+  // Inne (zachowane z NAME_ALIASES)
+  'burger': 'burger',
+  'burgera': 'burger',
+  'czosnkowa': 'zupa czosnkowa',
+  'zurek': 'żurek śląski',
+  'schabowy': 'kotlet schabowy',
+  'kotlet': 'kotlet schabowy',
+  'pierogi': 'pierogi z mięsem',
+  'gulasz': 'gulasz wieprzowy',
+  'rolada': 'rolada śląska',
+  'lasagne': 'lasagne bolognese',
+  'pad thai': 'pad thai z krewetkami',
+  'sajgonki': 'sajgonki z mięsem',
+  'frytki': 'frytki belgijskie',
+  'głodzilla': 'głodzilla',
+  'glodzilla': 'głodzilla',
+  'godzilla': 'głodzilla'
+};
+
+/**
+ * applyAliases - deterministyczna mapa aliasów z bezpiecznym fallbackiem
+ * 
+ * ZMIANA ZACHOWANIA:
+ * - Używa deterministycznej mapy aliasów (nie fuzzy-match)
+ * - Jeśli alias nie znaleziony → zwraca oryginalny tekst (nie failuje)
+ * - NIE throw, NIE failuj, zawsze zwraca string
+ * 
+ * @param {string} text - Tekst do przetworzenia
+ * @returns {string} - Tekst z zastosowanymi aliasami lub oryginał
+ */
 export function applyAliases(text) {
-  if (!text) return '';
-  const original = String(text);
+  // Bezpieczny fallback dla pustego/null/undefined
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  const original = String(text).trim();
+  if (!original) {
+    return '';
+  }
+
   let normalized = normalizeTxt(original);
-  let output = original; // domyślnie zwracaj oryginał, jeśli brak zamian
+  let output = original;
   let anyReplacement = false;
 
-  console.log(`🔍 [applyAliases] Original text: "${original}"`);
-  console.log(`🔍 [applyAliases] Normalized: "${normalized}"`);
-
-  for (const [alias, fullName] of Object.entries(NAME_ALIASES)) {
+  // Przeszukaj deterministyczną mapę aliasów
+  for (const [alias, fullName] of Object.entries(DETERMINISTIC_ALIAS_MAP)) {
     const aliasNorm = normalizeTxt(alias);
     const fullNorm = normalizeTxt(fullName);
 
+    // Sprawdź czy znormalizowany tekst zawiera alias
     if (normalized.includes(aliasNorm) && !normalized.includes(fullNorm)) {
-      // 1) Spróbuj podmienić w oryginalnym tekście (z diakrytykami), jeśli tam alias występuje
-      const origRegex = new RegExp(alias, 'gi');
+      // Spróbuj podmienić w oryginalnym tekście (zachowaj diakrytyki)
+      const origRegex = new RegExp(alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
       if (origRegex.test(output)) {
         output = output.replace(origRegex, fullName);
         anyReplacement = true;
-        console.log(`🔍 [applyAliases] Replaced (original) "${alias}" → "${fullName}"`);
       } else {
-        // 2) Fallback: zamień w wersji znormalizowanej, a następnie przypisz do output
-        normalized = normalized.replace(new RegExp(aliasNorm, 'gi'), fullNorm);
-        output = normalized; // w tym trybie wynik będzie znormalizowany
+        // Fallback: zamień w wersji znormalizowanej
+        normalized = normalized.replace(new RegExp(aliasNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), fullNorm);
+        output = normalized;
         anyReplacement = true;
-        console.log(`🔍 [applyAliases] Replaced (normalized) "${aliasNorm}" → "${fullNorm}"`);
       }
 
-      // Aktualizuj normalized, żeby kolejne aliasy widziały już zmiany
+      // Aktualizuj normalized dla kolejnych iteracji
       normalized = normalizeTxt(output);
     }
   }
 
-  console.log(`🔍 [applyAliases] Final result: "${output}"`);
+  // Zawsze zwróć string (nawet jeśli brak zamian)
   return anyReplacement ? output : original;
 }
 
@@ -356,7 +424,31 @@ export function parseOrderItems(text, catalog) {
     };
   }
 
-  const textAliased = applyAliases(text);
+  // Bezpieczne zastosowanie aliasów (nie throw)
+  let textAliased;
+  let unknownItems = [];
+  
+  try {
+    textAliased = applyAliases(text);
+    // Jeśli applyAliases zwróciło oryginał i nie znalazło aliasu,
+    // sprawdź czy to może być unknown_item
+    if (textAliased === text) {
+      // Sprawdź czy tekst nie pasuje do żadnego aliasu
+      const normalized = normalizeTxt(text);
+      const hasKnownAlias = Object.keys(DETERMINISTIC_ALIAS_MAP).some(alias => 
+        normalized.includes(normalizeTxt(alias))
+      );
+      if (!hasKnownAlias && text.trim().length > 0) {
+        // Może być unknown_item - zapisz do późniejszej weryfikacji
+        unknownItems.push({ name: text, reason: 'no_alias_match' });
+      }
+    }
+  } catch (err) {
+    console.warn('[parseOrderItems] applyAliases error:', err.message);
+    textAliased = text; // Fallback do oryginału
+    unknownItems.push({ name: text, reason: 'alias_error' });
+  }
+
   const preferredSize = extractSize(textAliased);
   const requestedItems = extractRequestedItems(text);
 
@@ -368,51 +460,109 @@ export function parseOrderItems(text, catalog) {
       groups: [],
       clarify: [],
       available: [],
-      unavailable: requestedItems || [],
-      needsClarification: false,
-      missingAll: true
+      unavailable: requestedItems?.map(i => i.name).filter(Boolean) || [],
+      needsClarification: true, // Wymaga wyjaśnienia (brak katalogu)
+      missingAll: true,
+      unknownItems: unknownItems
     };
   }
 
   // Multi-item parsing: split text by "i", "oraz", ","
-  const itemTexts = splitMultipleItems(textAliased);
+  // Bezpieczne parsowanie - nie throw
+  let itemTexts = [];
+  try {
+    itemTexts = splitMultipleItems(textAliased);
+  } catch (err) {
+    console.warn('[parseOrderItems] splitMultipleItems error:', err.message);
+    itemTexts = [textAliased]; // Fallback do całego tekstu
+  }
+
   const allHits = [];
 
   for (const itemText of itemTexts) {
     if (!itemText || typeof itemText !== 'string') continue;
 
-    const qty = extractQuantity(itemText);
-    const hits = catalog
-      .filter(it => it && it.name && fuzzyIncludes(it.name, itemText))
-      .map(it => ({
-        menuItemId: it.id || null,
-        name: it.name || 'Unknown',
-        price: it.price || 0,
-        quantity: qty || 1,
-        restaurant_id: it.restaurant_id || null,
-        restaurant_name: it.restaurant_name || 'Unknown',
-        matchScore: 1.0
-      }));
-    allHits.push(...hits);
+    try {
+      const qty = extractQuantity(itemText) || 1; // Domyślnie 1 jeśli brak ilości
+      const hits = catalog
+        .filter(it => {
+          try {
+            return it && it.name && fuzzyIncludes(it.name, itemText);
+          } catch (err) {
+            console.warn('[parseOrderItems] fuzzyIncludes error:', err.message);
+            return false; // Bezpieczne - nie dopasuj jeśli błąd
+          }
+        })
+        .map(it => ({
+          menuItemId: it.id || null,
+          name: it.name || 'Unknown',
+          price: typeof it.price === 'number' ? it.price : 0, // Bezpieczna konwersja
+          quantity: qty,
+          restaurant_id: it.restaurant_id || null,
+          restaurant_name: it.restaurant_name || 'Unknown',
+          matchScore: 1.0
+        }));
+      allHits.push(...hits);
+    } catch (err) {
+      console.warn('[parseOrderItems] Error processing item:', itemText, err.message);
+      // Kontynuuj z następnym itemem - nie failuj całego parsowania
+      unknownItems.push({ name: itemText, reason: `processing_error: ${err.message}` });
+    }
   }
 
-  const { selected, clarifications } = dedupHitsByBase(allHits, preferredSize);
+  // Bezpieczne deduplikowanie
+  let selected = [];
+  let clarifications = [];
+  try {
+    const dedupResult = dedupHitsByBase(allHits, preferredSize);
+    selected = dedupResult.selected || [];
+    clarifications = dedupResult.clarifications || [];
+  } catch (err) {
+    console.warn('[parseOrderItems] dedupHitsByBase error:', err.message);
+    selected = allHits; // Fallback - użyj wszystkich hitów
+    clarifications = [];
+  }
 
   // Sprawdź czy są niedostępne pozycje (fallback) – nie psuj głównego dopasowania
-  const matched = (selected || []).filter(h => h && h.matchScore > 0.75);
-  const requestedNames = (requestedItems || []).map(i => i && i.name ? i.name.toLowerCase() : '').filter(Boolean);
-  const availableNames = matched.map(m => m && m.name ? m.name.toLowerCase() : '').filter(Boolean);
+  // Bezpieczne filtrowanie - nie throw
+  const matched = (selected || []).filter(h => {
+    try {
+      return h && (h.matchScore || 0) > 0.75;
+    } catch {
+      return false;
+    }
+  });
+  
+  const requestedNames = (requestedItems || []).map(i => {
+    try {
+      return i && i.name ? i.name.toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  }).filter(Boolean);
+  
+  const availableNames = matched.map(m => {
+    try {
+      return m && m.name ? m.name.toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  }).filter(Boolean);
 
-  // Helper do bezpiecznego fuzzy porównania nazwy dania
+  // Helper do bezpiecznego fuzzy porównania nazwy dania (nie throw)
   const fuzzyNameHit = (needle, haystackName) => {
-    if (!needle || !haystackName) return false;
-    const n = normalizeTxt(needle);
-    const h = normalizeTxt(haystackName);
-    if (!n || !h) return false;
-    if (h.includes(n) || n.includes(h)) return true;
-    // lżejszy próg: przynajmniej 1 wspólny token >2 znaków
-    const toks = n.split(' ').filter(Boolean).filter(t => t.length > 2);
-    return toks.some(t => h.includes(t));
+    try {
+      if (!needle || !haystackName) return false;
+      const n = normalizeTxt(needle);
+      const h = normalizeTxt(haystackName);
+      if (!n || !h) return false;
+      if (h.includes(n) || n.includes(h)) return true;
+      // lżejszy próg: przynajmniej 1 wspólny token >2 znaków
+      const toks = n.split(' ').filter(Boolean).filter(t => t.length > 2);
+      return toks.some(t => h.includes(t));
+    } catch {
+      return false; // Bezpieczne - nie dopasuj jeśli błąd
+    }
   };
 
   // Pozycję uznajemy za „dostępną”, jeśli:
@@ -435,21 +585,49 @@ export function parseOrderItems(text, catalog) {
   console.log(`  - matched.length: ${matched.length}`);
   console.log(`  - clarifications.length: ${clarifications?.length || 0}`);
 
+  // Bezpieczne grupowanie - nie throw
   const byR = {};
   for (const h of matched) {
-    byR[h.restaurant_id] ??= { restaurant_id: h.restaurant_id, restaurant_name: h.restaurant_name, items: [] };
-    byR[h.restaurant_id].items.push({
-      menuItemId: h.menuItemId, name: h.name, price: h.price, quantity: h.quantity
+    try {
+      if (!h || !h.restaurant_id) continue; // Pomiń nieprawidłowe hitów
+      const restaurantId = h.restaurant_id;
+      if (!byR[restaurantId]) {
+        byR[restaurantId] = { 
+          restaurant_id: restaurantId, 
+          restaurant_name: h.restaurant_name || 'Unknown', 
+          items: [] 
+        };
+      }
+      byR[restaurantId].items.push({
+        menuItemId: h.menuItemId || null,
+        name: h.name || 'Unknown',
+        price: typeof h.price === 'number' ? h.price : 0,
+        quantity: typeof h.quantity === 'number' ? h.quantity : 1
+      });
+    } catch (err) {
+      console.warn('[parseOrderItems] Error grouping item:', err.message);
+      // Kontynuuj z następnym itemem
+    }
+  }
+
+  // Jeśli są unknown items i nie znaleziono dopasowań, dodaj je do unavailable
+  const finalUnavailable = [...unavailableNames];
+  if (unknownItems.length > 0 && matched.length === 0 && allHits.length === 0) {
+    unknownItems.forEach(item => {
+      if (!finalUnavailable.includes(item.name)) {
+        finalUnavailable.push(item.name);
+      }
     });
   }
 
   return {
     any: allHits.length > 0,
     groups: Object.values(byR),
-    clarify: clarifications,
-    available: matched,
-    unavailable: unavailableNames,
-    needsClarification: unavailableNames.length > 0 || (clarifications && clarifications.length > 0)
+    clarify: clarifications || [],
+    available: matched || [],
+    unavailable: finalUnavailable,
+    needsClarification: finalUnavailable.length > 0 || (clarifications && clarifications.length > 0) || unknownItems.length > 0,
+    unknownItems: unknownItems // Nowe pole dla nieznanych pozycji
   };
 }
 
@@ -480,15 +658,79 @@ async function withTimeout(promise, timeoutMs, operationName) {
   }
 }
 
+/**
+ * Bezpieczny fallback - zawsze zwraca jakiś intent
+ */
+function safeFallbackIntent(text, reason = 'unknown_error') {
+  return {
+    intent: 'UNKNOWN_INTENT',
+    confidence: 0,
+    reason: reason,
+    rawText: text || '',
+    restaurant: null,
+    fallback: true
+  };
+}
+
 export async function detectIntent(text, session = null) {
   console.log('[intent-router] 🚀 detectIntent called with:', { text, sessionId: session?.id });
 
-  if (!text) {
-    updateDebugSession({ intent: 'none', restaurant: null, sessionId: session?.id || null });
-    return { intent: 'none', restaurant: null };
+  // Bezpieczny fallback dla pustego inputu
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    const fallback = safeFallbackIntent(text, 'empty_input');
+    updateDebugSession({ 
+      intent: fallback.intent, 
+      restaurant: null, 
+      sessionId: session?.id || null 
+    });
+    return fallback;
   }
 
   try {
+    // ==========================================
+    // ETAP 1: DETEKCJA INTENCJI FUNKCJONALNEJ
+    // ==========================================
+    // Wykryj intencję NA PODSTAWIE ZAMIARU, nie frazy
+    const functionalIntent = detectFunctionalIntent(text, session);
+    
+    // Jeśli wykryto funkcjonalny intent (ADD_ITEM, CONTINUE_ORDER, etc.)
+    // i ma wysoką pewność, zwróć go od razu (bez parsowania treści)
+    if (isFunctionalIntent(functionalIntent.intent) && functionalIntent.confidence >= 0.85) {
+      console.log(`[intent-router] ✅ Functional intent detected: ${functionalIntent.intent} (confidence: ${functionalIntent.confidence})`);
+      
+      // Mapuj funkcjonalne intenty na intenty używane w systemie
+      let mappedIntent = functionalIntent.intent;
+      if (functionalIntent.intent === FUNCTIONAL_INTENTS.CONFIRM_ORDER) {
+        mappedIntent = 'confirm_order';
+      } else if (functionalIntent.intent === FUNCTIONAL_INTENTS.CANCEL_ORDER) {
+        mappedIntent = 'cancel_order';
+      } else if (functionalIntent.intent === FUNCTIONAL_INTENTS.ADD_ITEM || 
+                 functionalIntent.intent === FUNCTIONAL_INTENTS.CONTINUE_ORDER) {
+        mappedIntent = 'create_order'; // ADD_ITEM i CONTINUE_ORDER → create_order
+      }
+      
+      updateDebugSession({
+        intent: mappedIntent,
+        restaurant: null,
+        sessionId: session?.id || null,
+        confidence: functionalIntent.confidence
+      });
+      
+      return {
+        intent: mappedIntent,
+        confidence: functionalIntent.confidence,
+        reason: functionalIntent.reason,
+        rawText: functionalIntent.rawText,
+        restaurant: null,
+        functionalIntent: functionalIntent.intent // Zachowaj oryginalny funkcjonalny intent
+      };
+    }
+
+    // ==========================================
+    // ETAP 2: PARSOWANIE TREŚCI (CO KONKRETNIE)
+    // ==========================================
+    // Dopiero po wykryciu intentu parsuj produkty, ilości, warianty
+
     // --- Korekta STT / lokalizacji ---
     let normalizedText = text.toLowerCase()
       .replace(/\bsokolica\b/g, "okolicy") // typowa halucynacja STT
@@ -1021,22 +1263,26 @@ export async function detectIntent(text, session = null) {
       console.warn('⚠️ Phrase insert skipped:', err.message);
     }
 
+    // Bezpieczny fallback - zawsze zwróć jakiś intent (NIE 'none')
+    const fallback = safeFallbackIntent(text, 'no_keywords_matched');
     updateDebugSession({ 
-      intent: 'none', 
+      intent: fallback.intent, 
       restaurant: null,
       sessionId: session?.id || null,
       confidence: 0.0
     });
-    return { intent: 'none', restaurant: null };
+    return fallback;
   } catch (err) {
     console.error('🧠 detectIntent error:', err.message);
+    // Bezpieczny fallback - zawsze zwróć jakiś intent (NIE throw, NIE crash)
+    const fallback = safeFallbackIntent(text, `error_in_detection: ${err.message}`);
     updateDebugSession({ 
-      intent: 'error', 
+      intent: fallback.intent, 
       restaurant: null,
       sessionId: session?.id || null,
       confidence: 0.0
     });
-    return { intent: 'none', restaurant: null };
+    return fallback;
   }
 }
 
