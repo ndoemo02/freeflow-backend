@@ -56,11 +56,12 @@ export function boostIntent(det, text, session) {
     if (confirmPhrases.some(p => lower.includes(p))) {
       // Return structured object if det was object, or create new one
       return {
+        // Preserve other props if det is object (spread first)
+        ...(typeof det === 'object' ? det : {}),
+        // Then override with boosted values
         intent: 'show_menu',
         confidence: 0.99,
-        boosted: true,
-        // Preserve other props if det is object
-        ...(typeof det === 'object' ? det : {})
+        boosted: true
       };
     }
   }
@@ -76,11 +77,13 @@ export function boostIntent(det, text, session) {
 
     if (isSelection) {
       return {
+        // Preserve other props if det is object (spread first)
+        ...(typeof det === 'object' ? det : {}),
+        // Then override with boosted values
         intent: 'select_restaurant',
         confidence: 0.99,
         fromExpected: true, // Mark as expected match
-        boosted: true,
-        ...(typeof det === 'object' ? det : {})
+        boosted: true
       };
     }
   }
@@ -90,10 +93,12 @@ export function boostIntent(det, text, session) {
     const confirmPhrases = ["tak", "potwierdzam", "poprosze", "poproszę", "jasne", "ok", "dobrze", "pewnie"];
     if (confirmPhrases.some(p => lower.includes(p))) {
       return {
+        // Preserve other props if det is object (spread first)
+        ...(typeof det === 'object' ? det : {}),
+        // Then override with boosted values
         intent: 'confirm', // or 'confirm_order'? User said 'confirm'.
         confidence: 0.99,
-        boosted: true,
-        ...(typeof det === 'object' ? det : {})
+        boosted: true
       };
     }
   }

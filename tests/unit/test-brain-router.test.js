@@ -1,10 +1,14 @@
 /**
  * Testy jednostkowe dla brainRouter
  * Testuje logikę boostIntent i parsowania restauracji
+ * 
+ * UWAGA: Po wprowadzeniu Smart Intent System, boostIntent jest używany jako warstwa
+ * kontekstowa po smartResolveIntent. Testy zostały zaktualizowane aby odzwierciedlać
+ * nową architekturę.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { boostIntent } from '../../api/brain/brainRouter.js';
+import { boostIntent } from '../../api/brain/intents/boostIntent.js';
 
 const parseRestaurantAndDish = (text) => {
   const normalized = text.toLowerCase();
@@ -45,75 +49,86 @@ const parseRestaurantAndDish = (text) => {
 };
 
 describe('boostIntent Function', () => {
-  it('should not modify high confidence intents', () => {
-    expect(boostIntent('test', 'find_nearby', 0.9)).toBe('find_nearby');
-    expect(boostIntent('test', 'menu_request', 0.85)).toBe('menu_request');
+  // boostIntent teraz działa tylko w kontekście expectedContext
+  // Bez expectedContext zwraca det bez zmian
+  
+  it('should return det unchanged when no expectedContext', () => {
+    const det = { intent: 'find_nearby', confidence: 0.8 };
+    const result = boostIntent(det, 'test', {});
+    expect(result).toEqual(det);
   });
 
-  it('should detect confirm intent', () => {
-    expect(boostIntent('tak', 'none', 0.5)).toBe('confirm');
-    expect(boostIntent('ok', 'none', 0.5)).toBe('confirm');
-    expect(boostIntent('dobrze', 'none', 0.5)).toBe('confirm');
+  it('should return det unchanged when session is null', () => {
+    const det = { intent: 'menu_request', confidence: 0.7 };
+    const result = boostIntent(det, 'test', null);
+    expect(result).toEqual(det);
   });
 
-  it('should detect change_restaurant intent', () => {
-    expect(boostIntent('nie', 'none', 0.5)).toBe('change_restaurant');
-    expect(boostIntent('pokaż inne', 'none', 0.5)).toBe('change_restaurant');
-    expect(boostIntent('zmień restaurację', 'none', 0.5)).toBe('change_restaurant');
+  it('should boost to show_menu when expectedContext is confirm_menu', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'confirm_menu' };
+    const result = boostIntent(det, 'tak', session);
+    
+    expect(result.intent).toBe('show_menu');
+    expect(result.confidence).toBe(0.99);
+    expect(result.boosted).toBe(true);
   });
 
-  it('should detect recommend intent', () => {
-    expect(boostIntent('co polecasz', 'none', 0.5)).toBe('recommend');
-    expect(boostIntent('co warto zjeść', 'none', 0.5)).toBe('recommend');
-    expect(boostIntent('polecisz coś', 'none', 0.5)).toBe('recommend');
+  it('should boost to select_restaurant when expectedContext is select_restaurant', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'select_restaurant' };
+    const result = boostIntent(det, 'pierwsza', session);
+    
+    expect(result.intent).toBe('select_restaurant');
+    expect(result.confidence).toBe(0.99);
+    expect(result.fromExpected).toBe(true);
   });
 
-  it('should detect find_nearby for quick food', () => {
-    expect(boostIntent('na szybko', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('coś szybkiego', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('fast food', 'none', 0.5)).toBe('find_nearby');
+  it('should handle numeric selection for select_restaurant', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'select_restaurant' };
+    
+    expect(boostIntent(det, '1', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, '2', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, 'pierwsza', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, 'wybieram', session).intent).toBe('select_restaurant');
   });
 
-  it('should detect find_nearby for general food search', () => {
-    expect(boostIntent('mam ochotę na coś', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('chcę coś zjeść', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('szukam czegoś do jedzenia', 'none', 0.5)).toBe('find_nearby');
+  it('should boost to confirm when expectedContext is confirm_choice', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'confirm_choice' };
+    const result = boostIntent(det, 'tak', session);
+    
+    expect(result.intent).toBe('confirm');
+    expect(result.confidence).toBe(0.99);
+    expect(result.boosted).toBe(true);
   });
 
-  it('should detect find_nearby for availability queries', () => {
-    expect(boostIntent('co jest dostępne', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('co w pobliżu', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('co jest w okolicy', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('co mam w pobliżu', 'none', 0.5)).toBe('find_nearby');
+  it('should not boost for long phrases (>5 words)', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'select_restaurant' };
+    const longText = 'chcę wybrać pierwszą restaurację z listy';
+    
+    const result = boostIntent(det, longText, session);
+    expect(result).toEqual(det); // Should return unchanged
   });
 
-  it('should detect find_nearby for vegetarian queries', () => {
-    expect(boostIntent('coś wegetariańskiego', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('wegańskie jedzenie', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('roślinne opcje', 'none', 0.5)).toBe('find_nearby');
+  it('should preserve original det properties when boosting', () => {
+    const det = { intent: 'none', confidence: 0.3, slots: { test: 'value' } };
+    const session = { expectedContext: 'confirm_menu' };
+    const result = boostIntent(det, 'tak', session);
+    
+    expect(result.intent).toBe('show_menu');
+    expect(result.slots).toEqual({ test: 'value' });
   });
 
-  it('should detect create_order intent', () => {
-    expect(boostIntent('zamów tutaj', 'none', 0.5)).toBe('create_order');
-    expect(boostIntent('chcę to zamówić', 'none', 0.5)).toBe('create_order');
-    expect(boostIntent('zamów to', 'none', 0.5)).toBe('create_order');
-  });
-
-  it('should detect menu_request intent', () => {
-    expect(boostIntent('pokaż menu', 'none', 0.5)).toBe('menu_request');
-    expect(boostIntent('co mają w menu', 'none', 0.5)).toBe('menu_request');
-    expect(boostIntent('zobacz co serwują', 'none', 0.5)).toBe('menu_request');
-  });
-
-  it('should fallback to find_nearby for generic food keywords', () => {
-    expect(boostIntent('restauracja', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('chcę zjeść', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('posiłek', 'none', 0.5)).toBe('find_nearby');
-  });
-
-  it('should return original intent if no patterns match', () => {
-    expect(boostIntent('random text', 'menu_request', 0.5)).toBe('menu_request');
-    expect(boostIntent('hello world', 'none', 0.5)).toBe('none');
+  it('should handle string det input (backward compatibility)', () => {
+    const session = { expectedContext: 'select_restaurant' };
+    const result = boostIntent('none', '1', session);
+    
+    // Should return object even if det was string
+    expect(typeof result).toBe('object');
+    expect(result.intent).toBe('select_restaurant');
   });
 });
 
@@ -167,121 +182,73 @@ describe('parseRestaurantAndDish Function', () => {
 
 describe('Edge Cases', () => {
   it('should handle empty strings', () => {
-    expect(boostIntent('', 'none', 0.5)).toBe('none');
+    const det = { intent: 'none', confidence: 0.5 };
+    const result = boostIntent(det, '', {});
+    expect(result).toEqual(det);
     expect(parseRestaurantAndDish('')).toEqual({ dish: null, restaurant: null });
   });
 
-  it('should handle special characters', () => {
-    expect(boostIntent('co jest dostępne?', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('zamów tutaj!', 'none', 0.5)).toBe('create_order');
+  it('should handle special characters in text', () => {
+    const det = { intent: 'none', confidence: 0.5 };
+    const session = { expectedContext: 'confirm_menu' };
+    const result = boostIntent(det, 'tak!', session);
+    expect(result.intent).toBe('show_menu');
   });
 
   it('should handle mixed case', () => {
-    expect(boostIntent('CO JEST DOSTĘPNE', 'none', 0.5)).toBe('find_nearby');
-    expect(boostIntent('Pokaż Menu', 'none', 0.5)).toBe('menu_request');
+    const det = { intent: 'none', confidence: 0.5 };
+    const session = { expectedContext: 'select_restaurant' };
+    const result = boostIntent(det, 'PIERWSZA', session);
+    expect(result.intent).toBe('select_restaurant');
   });
 });
 
 describe('expectedContext Follow-up Logic', () => {
-  it('should detect show_more_options when expectedContext is set', () => {
-    const session = { expectedContext: 'show_more_options' };
-    expect(boostIntent('pokaż więcej', 'none', 0.5, session)).toBe('show_more_options');
-    expect(boostIntent('pokaż więcej opcji', 'none', 0.5, session)).toBe('show_more_options');
-    expect(boostIntent('pokaż wszystkie', 'none', 0.5, session)).toBe('show_more_options');
-    expect(boostIntent('pokaż pozostałe', 'none', 0.5, session)).toBe('show_more_options');
-    expect(boostIntent('więcej opcji', 'none', 0.5, session)).toBe('show_more_options');
+  // boostIntent teraz działa tylko w kontekście expectedContext
+  // Te testy sprawdzają różne konteksty
+  
+  it('should boost to show_menu when expectedContext is confirm_menu', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'confirm_menu' };
+    const result = boostIntent(det, 'tak', session);
+    
+    expect(result.intent).toBe('show_menu');
+    expect(result.boosted).toBe(true);
   });
 
-  it('should detect select_restaurant when expectedContext is set', () => {
+  it('should boost to select_restaurant when expectedContext is select_restaurant', () => {
+    const det = { intent: 'none', confidence: 0.3 };
     const session = { expectedContext: 'select_restaurant' };
-    expect(boostIntent('wybieram', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('wybierz', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('ta pierwsza', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('ta druga', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('numer 1', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('numer 2', 'none', 0.5, session)).toBe('select_restaurant');
-    expect(boostIntent('2', 'none', 0.5, session)).toBe('select_restaurant');
+    
+    expect(boostIntent(det, 'wybieram', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, '1', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, 'pierwsza', session).intent).toBe('select_restaurant');
+    expect(boostIntent(det, 'ta pierwsza', session).intent).toBe('select_restaurant');
   });
 
-  it('should ignore expectedContext when user says something unrelated', () => {
-    const session = { expectedContext: 'show_more_options' };
-    // Użytkownik ignoruje pytanie i mówi coś zupełnie innego
-    expect(boostIntent('zamów taksówkę', 'none', 0.5, session)).not.toBe('show_more_options');
-    expect(boostIntent('pokaż menu', 'none', 0.5, session)).toBe('menu_request');
+  it('should not boost when text does not match expected context', () => {
+    const det = { intent: 'find_nearby', confidence: 0.7 };
+    const session = { expectedContext: 'select_restaurant' };
+    const result = boostIntent(det, 'co jest dostępne', session);
+    
+    // Should return unchanged because text doesn't match selection pattern
+    expect(result).toEqual(det);
   });
 
-  it('should not trigger expectedContext when session is null', () => {
-    expect(boostIntent('pokaż więcej', 'none', 0.5, null)).not.toBe('show_more_options');
-    expect(boostIntent('wybieram', 'none', 0.5, null)).not.toBe('select_restaurant');
+  it('should not boost when expectedContext is missing', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = {}; // No expectedContext
+    const result = boostIntent(det, 'tak', session);
+    
+    expect(result).toEqual(det);
   });
 
-  it('should not trigger expectedContext when expectedContext is null', () => {
-    const session = { expectedContext: null };
-    expect(boostIntent('pokaż więcej', 'none', 0.5, session)).not.toBe('show_more_options');
-    expect(boostIntent('wybieram', 'none', 0.5, session)).not.toBe('select_restaurant');
-  });
-
-  it('should prioritize expectedContext over other patterns', () => {
-    const session = { expectedContext: 'show_more_options' };
-    // "pokaż więcej" normalnie mogłoby być interpretowane jako inne intencje,
-    // ale expectedContext ma najwyższy priorytet
-    expect(boostIntent('pokaż więcej', 'find_nearby', 0.5, session)).toBe('show_more_options');
-  });
-
-  it('should not override high confidence intents even with expectedContext', () => {
-    const session = { expectedContext: 'show_more_options' };
-    // Jeśli intencja ma wysoką pewność (≥0.8), nie powinna być nadpisana
-    expect(boostIntent('pokaż więcej', 'menu_request', 0.9, session)).toBe('menu_request');
-  });
-
-  it('should detect confirm_order when expectedContext is confirm_order', () => {
-    const session = { expectedContext: 'confirm_order' };
-    // Proste potwierdzenia
-    expect(boostIntent('tak', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('ok', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('dobrze', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('zgoda', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('pewnie', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('jasne', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('oczywiście', 'none', 0.5, session)).toBe('confirm_order');
-
-    // Potwierdzenia z "dodaj"
-    expect(boostIntent('dodaj', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('dodaj do koszyka', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('proszę dodać', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('dodaj proszę', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('tak dodaj', 'none', 0.5, session)).toBe('confirm_order');
-
-    // Potwierdzenia z "zamów"
-    expect(boostIntent('zamów', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('zamawiam', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('tak zamawiam', 'none', 0.5, session)).toBe('confirm_order');
-
-    // Potwierdzenia z "potwierdź"
-    expect(boostIntent('potwierdź', 'none', 0.5, session)).toBe('confirm_order');
-    expect(boostIntent('potwierdzam', 'none', 0.5, session)).toBe('confirm_order');
-  });
-
-  it('should detect cancel_order when expectedContext is confirm_order and user says "nie"', () => {
-    const session = { expectedContext: 'confirm_order' };
-    expect(boostIntent('nie', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('anuluj', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('nie chcę', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('nie chce', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('rezygnuję', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('rezygnuje', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('nie teraz', 'none', 0.5, session)).toBe('cancel_order');
-    expect(boostIntent('nie zamawiaj', 'none', 0.5, session)).toBe('cancel_order');
-  });
-
-  it('should not trigger confirm_order when expectedContext is different', () => {
-    const session = { expectedContext: 'show_more_options' };
-    // "tak" powinno być interpretowane jako "confirm", nie "confirm_order"
-    expect(boostIntent('tak', 'none', 0.5, session)).toBe('confirm');
-  });
-
-  it('should not trigger confirm_order when session is null', () => {
-    expect(boostIntent('tak', 'none', 0.5, null)).toBe('confirm');
-    expect(boostIntent('nie', 'none', 0.5, null)).toBe('change_restaurant');
+  it('should boost to confirm when expectedContext is confirm_choice', () => {
+    const det = { intent: 'none', confidence: 0.3 };
+    const session = { expectedContext: 'confirm_choice' };
+    
+    expect(boostIntent(det, 'tak', session).intent).toBe('confirm');
+    expect(boostIntent(det, 'ok', session).intent).toBe('confirm');
+    expect(boostIntent(det, 'potwierdzam', session).intent).toBe('confirm');
   });
 });

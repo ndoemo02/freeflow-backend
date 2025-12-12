@@ -1,43 +1,32 @@
 import { supabase } from "../../_supabase.js";
-import { normalize } from "../utils/normalizeText.js";
+// Using local safe normalization instead of the destructive global util
+// import { normalize } from "../utils/normalizeText.js";
+
+// FAZA 2 — Alias map (deterministyczne)
+const ALIAS_MAP = {
+  "cola": "coca-cola",
+  "pepsi": "pepsi",
+  "frytki": "fries"
+};
+
+function normalize(text) {
+  if (!text) return "";
+  let s = text.toLowerCase();
+  // Basic Polish declension normalization (Accusative/Instrumental -> Nominative approximation)
+  s = s.replace(/ę\b/g, 'a'); // pizzę -> pizza
+  s = s.replace(/ą\b/g, 'a'); // pizzą -> pizza
+
+  // Safe cleanup
+  s = s.replace(/[^a-ząćęłńóśźż0-9\s]/g, ''); // remove punctuation
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
+}
 
 export function normalizeDishText(text) {
   return normalize(text);
 }
 
-export function levenshtein(a, b) {
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  return matrix[b.length][a.length];
-}
-
-export function fuzzyMatch(a, b, threshold = 3) {
-  if (!a || !b) return false;
-  const normA = normalize(a);
-  const normB = normalize(b);
-  if (normA === normB) return true;
-  if (normA.includes(normB) || normB.includes(normA)) return true;
-
-  // 🔧 Dodatkowy alias match — np. "vien" vs "vien thien"
-  if (normA.split(' ')[0] === normB.split(' ')[0]) return true;
-
-  const dist = levenshtein(normA, normB);
-  return dist <= threshold;
-}
+// Removed aggressive Levenshtein logic to stabilize Intent Detection
 
 export function parseRestaurantAndDish(text) {
   const normalized = text.toLowerCase();
@@ -81,6 +70,7 @@ export function parseRestaurantAndDish(text) {
 export function extractQuantity(text) {
   const normalized = text.toLowerCase();
 
+  // FAZA 1 — Twarde tokeny (liczby, ilości)
   // Pattern 1: Liczby (2x, 3x, 2 razy, 3 razy)
   const numPattern = /(\d+)\s*(?:x|razy|sztuk|porcj)/i;
   const numMatch = normalized.match(numPattern);
@@ -105,7 +95,9 @@ export function extractQuantity(text) {
   };
 
   for (const [word, qty] of Object.entries(wordMap)) {
-    if (normalized.includes(word)) {
+    // Word boundary check to avoid partial matches inside other words
+    const regex = new RegExp(`\\b${word}\\b`, 'i');
+    if (regex.test(normalized)) {
       return qty;
     }
   }
@@ -129,14 +121,25 @@ export async function findDishInMenu(restaurantId, dishName) {
 
     const normalizedDish = normalize(dishName);
 
-    // 1. Exact match
+    // FAZA 1: Exact match (Twarde tokeny - znane produkty)
     let matched = menu.find(item => normalize(item.name) === normalizedDish);
     if (matched) {
-      console.log(`✅ Exact match: "${dishName}" → ${matched.name}`);
+      console.log(`✅ Exact match (Phase 1): "${dishName}" → ${matched.name}`);
       return matched;
     }
 
-    // 2. Substring match
+    // FAZA 2: Alias Map
+    for (const [alias, realName] of Object.entries(ALIAS_MAP)) {
+      if (normalizedDish.includes(alias) || alias === normalizedDish) {
+        matched = menu.find(item => normalize(item.name) === normalize(realName));
+        if (matched) {
+          console.log(`✅ Alias match (Phase 2): "${dishName}" matches alias "${alias}" → ${matched.name}`);
+          return matched;
+        }
+      }
+    }
+
+    // Substring match as a safer fallback than fuzzy (still Phase 1-ish logic)
     matched = menu.find(item => {
       const normName = normalize(item.name);
       return normName.includes(normalizedDish) || normalizedDish.includes(normName);
@@ -146,15 +149,8 @@ export async function findDishInMenu(restaurantId, dishName) {
       return matched;
     }
 
-    // 3. Fuzzy match (Levenshtein distance ≤ 3)
-    matched = menu.find(item => fuzzyMatch(dishName, item.name, 3));
-    if (matched) {
-      console.log(`✅ Fuzzy match: "${dishName}" → ${matched.name}`);
-      return matched;
-    }
-
     console.warn(`⚠️ No match for dish: "${dishName}"`);
-    return null;
+    return null; // Don't return unknown_item here as this function expects a DB record or null
   } catch (err) {
     console.error('❌ findDishInMenu error:', err);
     return null;
@@ -165,7 +161,7 @@ export async function parseOrderItems(text, restaurantId) {
   if (!text || !restaurantId) return [];
 
   try {
-    console.log(`🛒 Parsing order items from: "${text}"`);
+    console.log(`🛒 Parsing order items from: "${text}" with 2-Phase Parsing`);
 
     // Pobierz menu restauracji
     const { data: menu, error } = await supabase
@@ -180,47 +176,85 @@ export async function parseOrderItems(text, restaurantId) {
 
     const items = [];
     const normalized = normalize(text);
-
-    // Wyciągnij ilość z tekstu
     const quantity = extractQuantity(text);
 
-    // Sprawdź każdą pozycję z menu czy jest w tekście
+    // FAZA 1 — Twarde tokeny (znane produkty z menu)
+    // Sprawdź czy nazwa dania z menu występuje w tekście
     for (const menuItem of menu) {
       const dishName = normalize(menuItem.name);
 
-      // Sprawdź czy nazwa dania jest w tekście (fuzzy match)
-      if (fuzzyMatch(text, menuItem.name, 3) || normalized.includes(dishName)) {
+      // Strict inclusion check instead of fuzzy
+      if (normalized.includes(dishName)) {
         items.push({
           id: menuItem.id,
           name: menuItem.name,
           price: parseFloat(menuItem.price_pln),
           quantity: quantity
         });
-        console.log(`✅ Found dish: ${menuItem.name} (qty: ${quantity})`);
+        console.log(`✅ Found dish (Phase 1): ${menuItem.name} (qty: ${quantity})`);
       }
     }
 
-    // Jeśli nie znaleziono żadnego dania, spróbuj wyciągnąć nazwę z tekstu
+    // FAZA 2 — Alias map
     if (items.length === 0) {
-      const parsed = parseRestaurantAndDish(text);
-      if (parsed.dish) {
-        const matched = await findDishInMenu(restaurantId, parsed.dish);
-        if (matched) {
-          items.push({
-            id: matched.id,
-            name: matched.name,
-            price: parseFloat(matched.price_pln),
-            quantity: quantity
-          });
-          console.log(`✅ Found dish via parsing: ${matched.name} (qty: ${quantity})`);
+      for (const [alias, realName] of Object.entries(ALIAS_MAP)) {
+        // Use word boundary for aliases to avoid "s" matching "sand" etc. if alias is short
+        // But for "cola" vs "coca-cola", simple include might be okay, but regex is safer.
+        if (normalized.includes(alias)) {
+          const targetItem = menu.find(m => normalize(m.name).includes(normalize(realName)) || normalize(realName).includes(normalize(m.name)));
+          if (targetItem) {
+            // Check if already added to avoid duplicates if Phase 1 somehow missed it but Phase 2 caught it
+            // (Though we only enter here if items.length === 0, or we can allow multiple)
+            if (!items.find(i => i.id === targetItem.id)) {
+              items.push({
+                id: targetItem.id,
+                name: targetItem.name,
+                price: parseFloat(targetItem.price_pln),
+                quantity: quantity
+              });
+              console.log(`✅ Found dish via Alias (Phase 2): "${alias}" → ${targetItem.name}`);
+            }
+          }
         }
       }
     }
 
-    console.log(`🛒 Parsed ${items.length} items:`, items);
-    return items;
+    // Jeśli znaleziono, zwróć
+    if (items.length > 0) {
+      console.log(`🛒 Parsed ${items.length} items:`, items);
+      return items;
+    }
+
+    // Fallback logic -> Try to extract generic dish name
+    const parsed = parseRestaurantAndDish(text);
+    if (parsed.dish) {
+      // One last checks against menu using findDishInMenu (which also uses alias now)
+      const matched = await findDishInMenu(restaurantId, parsed.dish);
+      if (matched) {
+        items.push({
+          id: matched.id,
+          name: matched.name,
+          price: parseFloat(matched.price_pln),
+          quantity: quantity
+        });
+        return items;
+      } else {
+        // NIE FAILUJ -> Zwróć unknown_item
+        console.log(`⚠️ Parsed dish "${parsed.dish}" but not found in menu. Returning unknown_item.`);
+        return [{
+          id: 'unknown_item',
+          name: parsed.dish, // extracted text
+          price: 0,
+          quantity: quantity,
+          isUnknown: true
+        }];
+      }
+    }
+
+    return [];
   } catch (err) {
     console.error('❌ parseOrderItems error:', err);
     return [];
   }
 }
+
