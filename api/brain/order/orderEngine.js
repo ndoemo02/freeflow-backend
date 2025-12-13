@@ -1,1 +1,2 @@
-export { parseOrderItems, parseRestaurantAndDish, extractQuantity, fuzzyMatch, levenshtein, findDishInMenu } from "./parseOrderItems.js";
+export { parseOrderItems, parseRestaurantAndDish, extractQuantity, findDishInMenu } from "./parseOrderItems.js";
+export { fuzzyMatch, levenshtein } from "../helpers.js";

@@ -1,5 +1,5 @@
 import { supabase } from "../../_supabase.js";
-import { fuzzyMatch } from "../order/parseOrderItems.js";
+import { fuzzyMatch } from "../helpers.js";
 import { normalize } from "../utils/normalizeText.js";
 
 export const nearbyCitySuggestions = {

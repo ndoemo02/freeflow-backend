@@ -449,6 +449,17 @@ app.get('/api/ping', async (req, res) => {
   }
 });
 
+// === TTS Public Endpoint ===
+app.post("/api/tts", async (req, res) => {
+  try {
+    const tts = await import("./tts.js");
+    return tts.default(req, res);
+  } catch (err) {
+    console.error("❌ TTS Endpoint Error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // === RESTAURANTS ===
 app.get("/api/restaurants", async (req, res) => {
   try {

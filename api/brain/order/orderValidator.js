@@ -1,5 +1,5 @@
 
-import { fuzzyMatch } from "./parseOrderItems.js";
+import { fuzzyMatch } from "../helpers.js";
 
 export function validateOrderItem(itemCandidate, restaurantMenu) {
     // 1. Try exact or fuzzy match
@@ -7,14 +7,17 @@ export function validateOrderItem(itemCandidate, restaurantMenu) {
         (m.name || '').toLowerCase() === (itemCandidate.name || '').toLowerCase()
     );
 
+    /* 
+    // TEMPORARY: FUZZY MATCH DISABLED
     if (!matched) {
         matched = restaurantMenu.find(m => fuzzyMatch(itemCandidate.name, m.name, 3));
     }
+    */
 
     if (!matched) {
         // Suggest alternatives
         const suggestions = restaurantMenu
-            .filter(m => fuzzyMatch(itemCandidate.name, m.name, 5)) // looser threshold for suggestions
+            // .filter(m => fuzzyMatch(itemCandidate.name, m.name, 5)) // looser threshold for suggestions
             .slice(0, 3)
             .map(m => m.name);
 

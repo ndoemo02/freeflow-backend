@@ -1,7 +1,7 @@
 
 import { normalize } from "../utils/normalizeText.js";
 import { callLLM } from "../ai/llmClient.js";
-import { fuzzyMatch } from "../order/parseOrderItems.js";
+import { fuzzyMatch } from "../helpers.js";
 
 /**
  * Normalized string helper (removes diacritics, lowercase)

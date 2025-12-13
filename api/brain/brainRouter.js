@@ -283,12 +283,33 @@ export default async function handler(req, res) {
           ).join('\n') +
           '\n\nKtórą chcesz wybrać?';
 
+        // 🔊 TTS Generation (GeoContext Early Return)
+        let audioContent = null;
+        if (req.body?.includeTTS && process.env.NODE_ENV !== 'test') {
+          try {
+            // Determine tone
+            const ttsCfg = ttsRuntime(getSession(sessionId));
+            // Optional stylization
+            let textToSpeak = geoReply;
+            if (!ttsCfg.simple && process.env.OPENAI_MODEL) {
+              textToSpeak = await stylizeWithGPT4o(geoReply, 'find_nearby').catch(() => geoReply);
+            }
+            audioContent = await playTTS(textToSpeak, {
+              voice: ttsCfg.voice || 'pl-PL-Chirp3-HD-Erinome',
+              tone: ttsCfg.tone
+            });
+          } catch (e) {
+            console.warn('⚠️ TTS (GeoContext) failed:', e.message);
+          }
+        }
+
         return res.status(200).json({
           ok: true,
           intent: 'find_nearby',
           location: geoLocation,
           restaurants: geoRestaurants,
           reply: geoReply,
+          audioContent, // ✅ Dodane pole audioContent
           confidence: 0.85,
           fallback: false,
           context: getSession(sessionId),
@@ -2212,7 +2233,7 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
     const finalResponse = {
       ok: true,
       text: reply,
-      audio: ttsAudio,  // może być null
+      audioContent: ttsAudio,  // może być null
       intent,
       meta: {
         ...meta,
