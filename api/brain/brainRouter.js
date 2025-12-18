@@ -26,9 +26,35 @@ import { smartResolveIntent } from "./ai/smartIntent.js";
 import { resolveRestaurantSelectionHybrid } from "./restaurant/restaurantSelectionSmart.js";
 import { normalizeSize, normalizeExtras } from "./order/variantNormalizer.js";
 import { validateOrderItem } from "./order/orderValidator.js";
+import { EventLogger } from "./services/EventLogger.js";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const IS_TEST = !!(process.env.VITEST || process.env.VITEST_WORKER_ID || process.env.NODE_ENV === 'test');
+
+// --- HELPER: Persist Intent Log to database ---
+const persistIntentLog = async (p) => {
+  if (process.env.NODE_ENV === 'test') return;
+  try {
+    await supabase.from('amber_intents').insert({
+      intent: p.intent,
+      reply: typeof p.reply === 'string' ? p.reply.slice(0, 1000) : JSON.stringify(p.reply).slice(0, 1000),
+      duration_ms: p.durationMs,
+      confidence: p.confidence || 1.0,
+      fallback: !!p.fallback,
+      // Opcjonalnie: nlu_ms, db_ms, tts_ms jeśli dostępne w p
+      nlu_ms: p.nluMs || 0,
+      db_ms: p.dbMs || 0,
+      tts_ms: p.ttsMs || 0
+    });
+  } catch (e) {
+    // Ciche logowanie
+    if (e.message?.includes?.("relation \"amber_intents\" does not exist")) {
+      console.warn('⚠️ Table amber_intents missing. Analytics disabled.');
+    } else {
+      console.warn('⚠️ Analytics Log Error:', e.message);
+    }
+  }
+};
 
 // 🧹 Clear session cache on server start
 if (global.sessionCache) {
@@ -182,6 +208,24 @@ export default async function handler(req, res) {
     const __tStart = Date.now();
     let __nluMs = 0; let __tAfterNlu = 0; let __tBeforeTTS = 0; let __ttsMs = 0;
 
+    // Helpery językowe (przeniesione na górę scope'u)
+    const pluralPl = (n, one, few, many) => {
+      const mod10 = n % 10, mod100 = n % 100;
+      if (n === 1) return one;
+      if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
+      return many;
+    };
+    const formatDistance = (km) => {
+      if (km == null || !isFinite(km)) return '';
+      if (km < 1) {
+        const m = Math.max(1, Math.round(km * 1000));
+        return `${m} ${pluralPl(m, 'metr', 'metry', 'metrów')}`;
+      }
+      const k = Math.round(km * 10) / 10;
+      const whole = Math.round(k);
+      return `${k} ${pluralPl(whole, 'kilometr', 'kilometry', 'kilometrów')}`;
+    };
+
     // Globalny fallback - sprawdź credentials Supabase
     if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       console.error("🚨 Missing Supabase credentials");
@@ -223,6 +267,24 @@ export default async function handler(req, res) {
 
     if (!text) return res.status(400).json({ ok: false, error: "Missing text" });
 
+    // 🆕 V2 LOGGING helper
+    const mapWorkflowStep = (intentName) => {
+      if (!intentName) return 'unknown';
+      if (intentName.includes('find') || intentName.includes('nearby') || intentName.includes('city')) return 'find_nearby';
+      if (intentName.includes('menu')) return 'show_menu';
+      if (intentName.includes('create') || intentName.includes('add')) return 'create_order';
+      if (intentName.includes('confirm')) return 'confirm_order';
+      return intentName;
+    };
+
+    const initialWorkflowStep = mapWorkflowStep('request_received');
+
+    // Loguj otwarcie sesji (upsert)
+    EventLogger.logConversation(sessionId).catch(() => { });
+
+    // Loguj request
+    EventLogger.logEvent(sessionId, 'request_received', { text }, null, initialWorkflowStep).catch(() => { });
+
     // 🔹 Pobierz kontekst sesji (pamięć krótkotrwała)
     const rawSession = getSession(sessionId) || {};
 
@@ -253,7 +315,13 @@ export default async function handler(req, res) {
     });
 
     // 🔹 Krok 0: GeoContext Layer (priorytet najwyższy — przed detectIntent)
-    const geoLocation = extractLocation(text);
+    const isActionRequest = /\b(menu|karta|zamow|zamów|poprosze|poproszę|chce|chcę|wezme|wezmę)\b/i.test(text);
+    const geoLocationRaw = extractLocation(text);
+    const hasLocationPreposition = /\b(w|na|koło|przy|blisko|niedaleko|wokół)\b\s+/i.test(text);
+
+    // Skip GeoContext if it's an action request and location was found as a standalone word (likely restaurant name)
+    // but keep it if there's a clear preposition ("w Piekarach")
+    const geoLocation = (isActionRequest && !hasLocationPreposition) ? null : geoLocationRaw;
     const geoCuisineType = extractCuisineType(text);
 
     if (geoLocation) {
@@ -264,37 +332,49 @@ export default async function handler(req, res) {
       perf.dbMs += (Date.now() - __dbGeo0);
 
       if (geoRestaurants?.length) {
-        // Zapisz lokalizację i listę do sesji (dla follow-up: show_more_options/select_restaurant)
-        updateSession(sessionId, {
-          last_location: geoLocation,
-          lastIntent: 'find_nearby',
-          lastUpdated: Date.now(),
-          expectedContext: geoRestaurants.length > 1 ? 'select_restaurant' : null,
-          last_restaurants_list: geoRestaurants
-        });
-        console.log(`✅ GeoContext: ${geoRestaurants.length} restaurants found in "${geoLocation}"${geoCuisineType ? ` (cuisine: ${geoCuisineType})` : ''} — early return`);
-
-        // 🚨 EARLY RETURN — zatrzymaj dalsze przetwarzanie
+        // 🚨 EARLY HELPERS
         const cuisineInfo = geoCuisineType ? ` serwujących ${geoCuisineType}` : '';
-        const countText = geoRestaurants.length === 1 ? '1 restaurację' : `${geoRestaurants.length} restauracji`;
-        const geoReply = `W ${geoLocation} znalazłam ${countText}${cuisineInfo}:\n` +
-          geoRestaurants.map((r, i) =>
-            `${i + 1}. ${r.name}${r.cuisine_type ? ` - ${r.cuisine_type}` : ''}`
-          ).join('\n') +
-          '\n\nKtórą chcesz wybrać?';
+        const count = geoRestaurants.length;
+        const countText = `${count} ${pluralPl(count, 'restaurację', 'restauracje', 'restauracji')}`;
 
-        // 🔊 TTS Generation (GeoContext Early Return)
+        // 🚨 CHECK IF DIRECT REQUEST (skip confirmation)
+        const normalizedForGeo = normalizeTxt(text || '');
+        const isDirectRequest = /\b(pokaz|pokaż|znajdz|znajdź|menu|daj|lista|listę|jakie|gdzie|co\s+masz|czy\s+masz|trzy|cztery|pięć|3|4|5|wiele)\b/i.test(normalizedForGeo)
+          || /miejsca|lokale|knajpy|restauracje/.test(normalizedForGeo);
+
+        let intentName = 'find_nearby_confirmation';
+        let replyText = `Znalazłam ${countText}${cuisineInfo} w lokalizacji ${geoLocation}. Czy chcesz zobaczyć konkretne propozycje?`;
+        let resultList = []; // Default empty for confirmation
+
+        if (isDirectRequest) {
+          console.log('🚀 GeoContext: Direct request detected -> Skipping confirmation');
+          intentName = 'find_nearby';
+          replyText = `Oto ${countText}${cuisineInfo} w lokalizacji ${geoLocation}:`;
+          resultList = geoRestaurants; // Show cards immediately
+
+          updateSession(sessionId, {
+            expectedContext: 'select_restaurant',
+            last_location: geoLocation,
+            lastIntent: 'find_nearby',
+            lastUpdated: Date.now(),
+            last_restaurants_list: geoRestaurants
+          });
+        } else {
+          updateSession(sessionId, {
+            last_location: geoLocation,
+            lastIntent: 'find_nearby',
+            lastUpdated: Date.now(),
+            expectedContext: 'confirm_show_restaurants_city',
+            last_restaurants_list: geoRestaurants
+          });
+        }
+
+        // 🔊 TTS Generation
         let audioContent = null;
         if (req.body?.includeTTS && process.env.NODE_ENV !== 'test') {
           try {
-            // Determine tone
             const ttsCfg = ttsRuntime(getSession(sessionId));
-            // Optional stylization
-            let textToSpeak = geoReply;
-            if (!ttsCfg.simple && process.env.OPENAI_MODEL) {
-              textToSpeak = await stylizeWithGPT4o(geoReply, 'find_nearby').catch(() => geoReply);
-            }
-            audioContent = await playTTS(textToSpeak, {
+            audioContent = await playTTS(replyText, {
               voice: ttsCfg.voice || 'pl-PL-Chirp3-HD-Erinome',
               tone: ttsCfg.tone
             });
@@ -303,14 +383,32 @@ export default async function handler(req, res) {
           }
         }
 
+        // 🪵 LOGGING FOR ADMIN PANEL (GeoContext Fast Path)
+        if (process.env.NODE_ENV !== 'test') {
+          const wStep = 1; // find_nearby step
+          await EventLogger.logEvent(sessionId, 'intent_resolved', {
+            intent: intentName,
+            reply: replyText,
+            confidence: 0.95,
+            source: 'geo_context'
+          }, null, wStep, 'success');
+
+          await EventLogger.logEvent(sessionId, 'response_sent', {
+            intent: intentName,
+            reply: replyText,
+            timestamp: new Date().toISOString(),
+            meta: { location: geoLocation, count: geoRestaurants.length }
+          }, null, wStep, 'success');
+        }
+
         return res.status(200).json({
           ok: true,
-          intent: 'find_nearby',
+          intent: intentName,
           location: geoLocation,
-          restaurants: geoRestaurants,
-          reply: geoReply,
-          audioContent, // ✅ Dodane pole audioContent
-          confidence: 0.85,
+          restaurants: resultList,
+          reply: replyText,
+          audioContent,
+          confidence: 0.95,
           fallback: false,
           context: getSession(sessionId),
           timestamp: new Date().toISOString(),
@@ -418,7 +516,8 @@ export default async function handler(req, res) {
         } : null
       });
 
-      const boostedResult = boostIntent(text, hybridIntent, hybridConfidence, currentSession);
+      // FIX: boostIntent signature is (det, text, session)
+      const boostedResult = boostIntent({ intent: hybridIntent, confidence: hybridConfidence }, text, currentSession);
       // isContextLocked declared above
 
       if (typeof boostedResult === 'object' && boostedResult.intent) {
@@ -428,7 +527,8 @@ export default async function handler(req, res) {
           console.log(`🔒 Context Locked by Expected Matching: ${intent}`);
         }
       } else {
-        intent = boostedResult;
+        // Fallback if it returned string (legacy legacy) or null
+        intent = boostedResult?.intent || boostedResult || hybridIntent;
       }
 
       // --- Alias normalization patch ---
@@ -508,7 +608,7 @@ export default async function handler(req, res) {
 
     // 🧠 Krok 1.5b: GPT Reasoner Layer - decydowanie o akcjach systemu
     let reasoningDecision = null;
-    const SKIP_REASONER = (IS_TEST && process.env.FORCE_LLM_TEST !== 'true') || isContextLocked;
+    const SKIP_REASONER = (process.env.NODE_ENV === 'test' && process.env.FORCE_LLM_TEST !== 'true') || isContextLocked || (intent === 'create_order' && (parsed?.dish || parsedOrder?.any));
 
     if (!SKIP_REASONER) {
       try {
@@ -516,7 +616,8 @@ export default async function handler(req, res) {
           intent,
           text,
           session: currentSession,
-          parsed // Pass parsed restaurant/dish data to reasoner
+          parsed, // Pass parsed restaurant/dish data to reasoner
+          restaurant: parsed.restaurant || refinedRestaurant || restaurant || null
         });
 
         console.log('🧠 GPT Reasoner:', reasoningDecision);
@@ -556,7 +657,7 @@ export default async function handler(req, res) {
 
       if (reasoningDecision.searchRestaurants) intent = 'find_nearby';
       if (reasoningDecision.searchMenu) intent = 'menu_request';
-      if (reasoningDecision.completeOrder) intent = 'confirm_order';
+      if (reasoningDecision.completeOrder && intent !== 'create_order') intent = 'confirm_order';
     }
 
 
@@ -582,26 +683,98 @@ export default async function handler(req, res) {
       intent = "show_menu";
     }
 
+    if (intent === 'create_order' && session?.pendingOrder && session?.expectedContext === 'confirm_order') {
+      // Sprawdź czy user nie podał NOWEGO produktu (wtedy to nowe create_order/modyfikacja)
+      if (!parsed?.dish && !parsedOrder?.any) {
+        console.log('🔄 Context Override: "dodaj" treated as confirm_order (pending order exists)');
+        intent = 'confirm_order';
+      }
+    }
+
+    // === CONFIRM CITY RESULTS LOGIC (SKIPPED) ===
+    // Auto-confirm logic: we now show results immediately in GeoContext layer or here
+    if (session?.expectedContext === 'confirm_show_restaurants_city') {
+      console.log('✅ Auto-confirming city restaurants display');
+      intent = 'show_city_results';
+      updateSession(sessionId, { expectedContext: null });
+    }
+
     switch (intent) {
+      case "show_city_results": {
+        // Logika wyświetlania wyników z cache (po potwierdzeniu)
+        let restaurants = session.last_restaurants_list || [];
+        const locationName = session.last_location || 'wybranym mieście';
+        const totalFound = restaurants.length;
+
+        console.log(`🚀 RELOADED! show_city_results: displaying limited results from ${totalFound} found.`);
+
+        if (!restaurants.length) {
+          return res.status(200).json({
+            ok: true,
+            intent: 'find_nearby',
+            reply: "Hmm, nie widzę już tej listy w pamięci. Spróbujmy wyszukać od nowa.",
+            context: getSession(sessionId)
+          });
+        }
+
+        // ZAWĘŻENIE DO 3 (zgodnie z życzeniem usera)
+        restaurants = restaurants.slice(0, 3);
+
+        // Tekst do dymku
+        replyCore = `Znalazłam ${totalFound}. Oto top 3 propozycje w ${locationName}:\n` +
+          restaurants.map((r, i) => `${i + 1}. ${r.name} (${r.cuisine_type || 'kuchnia ogólna'})`).join('\n') +
+          '\n\nKtórą wybierasz?';
+
+        // Tekst dla TTS
+        const ttsText = `Oto 3 propozycje w ${locationName}: ` +
+          restaurants.map(r => r.name).join(', ') + ". Którą wybierasz?";
+
+        // 🔊 TTS Generation
+        let audioContent = null;
+        if (req.body?.includeTTS && process.env.NODE_ENV !== 'test') {
+          try {
+            const ttsCfg = ttsRuntime(getSession(sessionId));
+            audioContent = await playTTS(ttsText, {
+              voice: ttsCfg.voice || 'pl-PL-Chirp3-HD-Erinome',
+              tone: ttsCfg.tone
+            });
+          } catch (e) {
+            console.warn('⚠️ TTS (show_city_results) failed:', e.message);
+          }
+        }
+
+        // 📊 Analityka
+        persistIntentLog({
+          intent: 'show_city_results',
+          reply: replyCore,
+          durationMs: Date.now() - __tStart,
+          sessionId,
+          text: text,
+          confidence: 1.0
+        });
+
+        await EventLogger.logEvent(sessionId, 'intent_resolved', {
+          intent,
+          reply: replyCore,
+          confidence: hybridConfidence || 1,
+          source: hybridSource || 'unknown'
+        }, null, mapWorkflowStep(intent));
+
+        return res.status(200).json({
+          ok: true,
+          intent: 'find_nearby',
+          restaurants: restaurants,
+          reply: replyCore,
+          audioContent,
+          fallback: false,
+          context: getSession(sessionId),
+          timestamp: new Date().toISOString()
+        });
+      }
+
       case "find_nearby": {
         console.log('🧠 find_nearby intent detected');
-        // Natural distance formatter: <1km => meters; otherwise kilometers with Polish declension
-        const pluralPl = (n, one, few, many) => {
-          const mod10 = n % 10, mod100 = n % 100;
-          if (n === 1) return one;
-          if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return few;
-          return many;
-        };
-        const formatDistance = (km) => {
-          if (km == null || !isFinite(km)) return '';
-          if (km < 1) {
-            const m = Math.max(1, Math.round(km * 1000));
-            return `${m} ${pluralPl(m, 'metr', 'metry', 'metrów')}`;
-          }
-          const k = Math.round(km * 10) / 10;
-          const whole = Math.round(k);
-          return `${k} ${pluralPl(whole, 'kilometr', 'kilometry', 'kilometrów')}`;
-        };
+        // Helpery (pluralPl, formatDistance) są już zdefiniowane na górze scope'u
         function sanitizePlaceName(name, cuisine, category) {
           try {
             const safeName = (name || '').toString();
@@ -641,9 +814,12 @@ export default async function handler(req, res) {
           restaurants = await findRestaurantsByLocation(location, cuisineType, session);
 
           if (restaurants) {
+            // ZAWĘŻENIE DO 3 (zgodnie z życzeniem usera dla zapytań 'w pobliżu' / 'okolice')
+            restaurants = restaurants.slice(0, 3);
+
             // Zapisz lokalizację do sesji
             updateSession(sessionId, { last_location: location });
-            console.log(`✅ GeoContext: ${restaurants.length} restaurants found in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
+            console.log(`✅ GeoContext: ${restaurants.length} restaurants (capped) found in "${location}"${cuisineType ? ` (cuisine: ${cuisineType})` : ''}`);
           }
         } else {
           // 🔹 Brak lokalizacji w tekście – sprawdź czy mamy lat/lng z frontu
@@ -727,6 +903,14 @@ export default async function handler(req, res) {
               } catch (e) {
                 console.warn('⚠️ TTS (nearby lat/lng) failed:', e?.message);
               }
+
+              await EventLogger.logEvent(sessionId, 'intent_resolved', {
+                intent,
+                reply: replyCore,
+                confidence: hybridConfidence || 1,
+                source: hybridSource || 'unknown'
+              });
+
               return res.status(200).json({
                 ok: true,
                 intent: 'find_nearby',
@@ -745,6 +929,14 @@ export default async function handler(req, res) {
           // 🔹 Brak lokalizacji i brak lat/lng – miękki prompt
           console.log(`⚠️ No location found in text and no session.last_location available`);
           const prompt = "Brak lokalizacji. Podaj nazwę miasta (np. Bytom) lub powiedz 'w pobliżu'.";
+
+          await EventLogger.logEvent(sessionId, 'intent_resolved', {
+            intent,
+            reply: replyCore,
+            confidence: hybridConfidence || 1,
+            source: hybridSource || 'unknown'
+          });
+
           return res.status(200).json({ ok: true, intent: 'find_nearby', reply: prompt, fallback: true, context: getSession(sessionId) });
         }
 
@@ -961,7 +1153,7 @@ export default async function handler(req, res) {
             sessionId,
             userText: text,
             intent: "find_nearby",
-            confidence: confidence || 1.0,
+            confidence: hybridConfidence || 1.0,
             type: "MULTIPLE_MATCHES",
             candidates: restaurants.map(r => ({ id: r.id, name: r.name, city: r.city }))
           });
@@ -983,6 +1175,14 @@ export default async function handler(req, res) {
         }
 
         // RETURN IMMEDIATELY WITH STRUCTURED RESTAURANT DATA FOR FRONTEND
+
+        await EventLogger.logEvent(sessionId, 'intent_resolved', {
+          intent,
+          reply: replyCore,
+          confidence: hybridConfidence || 1,
+          source: hybridSource || 'unknown'
+        });
+
         return res.status(200).json({
           ok: true,
           intent: "find_nearby",
@@ -1095,34 +1295,22 @@ export default async function handler(req, res) {
           console.log(`✅ Using restaurant from detectIntent: ${selectedRestaurant.name}`);
 
           // Jeśli użytkownik w tym samym zdaniu prosi o MENU – pokaż menu od razu
-          const wantsMenu = /\b(menu|pokaz|pokaż|co maj|co serwuj)\b/i.test(String(text || ''));
+          // 🔹 AUTO-SHOW MENU: Always show menu after selection
+          console.log(`✅ Auto-showing menu for: ${selectedRestaurant.name}`);
+          try {
+            const { data: menu } = await withDb(
+              supabase.from("menu_items_v2").select("*").eq("restaurant_id", selectedRestaurant.id).order("name", { ascending: true })
+            );
+            // Simplified filter
+            const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
+            const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
+            const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
 
-          if (wantsMenu) {
-            // ... Logic to show menu immediately (keep existing helpers or duplicate reduced logic) ...
-            // To avoid massive duplication, I'll assume we fall through to 'show_menu' logic OR copy the fetch logic.
-            // For simplicity and robustness, let's keep the existing fetch logic but wrapped cleaner.
-            try {
-              const { data: menu } = await withDb(
-                supabase.from("menu_items_v2").select("id, name, price_pln, available, category").eq("restaurant_id", selectedRestaurant.id).order("name", { ascending: true })
-              );
-              // Filter logic (simplified for replacement brevity, assumes Helpers present or inline)
-              const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
-              const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
-              const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
-
-              updateSession(sessionId, { last_menu: shortlist, lastRestaurant: selectedRestaurant, expectedContext: null });
-              replyCore = `Wybrano ${selectedRestaurant.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
-            } catch (e) {
-              updateSession(sessionId, { lastRestaurant: selectedRestaurant });
-              replyCore = `Wybrano ${selectedRestaurant.name}. Nie mogę teraz pobrać menu.`;
-            }
-          } else {
-            // 🔹 STANDARD FLOW: Ask for confirmation
-            updateSession(sessionId, {
-              lastRestaurant: selectedRestaurant,
-              expectedContext: 'confirm_menu'
-            });
-            replyCore = `Wybrano restaurację ${selectedRestaurant.name}. Chcesz zobaczyć menu?`;
+            updateSession(sessionId, { last_menu: shortlist, lastRestaurant: selectedRestaurant, expectedContext: null });
+            replyCore = `Wybrano ${selectedRestaurant.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln || m.price || 0).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
+          } catch (e) {
+            updateSession(sessionId, { lastRestaurant: selectedRestaurant });
+            replyCore = `Wybrano ${selectedRestaurant.name}. Nie mogę teraz pobrać menu.`;
           }
           break;
         }
@@ -1178,30 +1366,22 @@ export default async function handler(req, res) {
         });
 
         // Jeśli użytkownik w tym samym zdaniu prosi o MENU – pokaż menu od razu
-        const wantsMenu = /\b(menu|pokaz|pokaż|co maj|co serwuj)\b/i.test(String(text || ''));
-        if (wantsMenu) {
-          try {
-            const { data: menu } = await withDb(
-              supabase.from("menu_items_v2").select("id, name, price_pln, available, category").eq("restaurant_id", chosen.id).order("name", { ascending: true })
-            );
-            // Simplified filter
-            const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
-            const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
-            const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
+        // 🔹 AUTO-SHOW MENU: Always show menu after selection
+        console.log(`✅ Auto-showing menu for: ${chosen.name}`);
+        try {
+          const { data: menu } = await withDb(
+            supabase.from("menu_items_v2").select("*").eq("restaurant_id", chosen.id).order("name", { ascending: true })
+          );
+          // Simplified filter
+          const bannedCategories = ['napoje', 'napoj', 'napój', 'drinki', 'alkohol', 'sosy', 'sos', 'dodatki', 'extra'];
+          const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
+          const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
 
-            updateSession(sessionId, { last_menu: shortlist, lastRestaurant: chosen, expectedContext: null });
-            replyCore = `Wybrano ${chosen.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
-          } catch (e) {
-            updateSession(sessionId, { lastRestaurant: chosen });
-            replyCore = `Wybrano ${chosen.name}. Nie mogę pobrać menu.`;
-          }
-        } else {
-          // 🔹 STANDARD FLOW: Ask for confirmation
-          updateSession(sessionId, {
-            lastRestaurant: chosen,
-            expectedContext: 'confirm_menu'
-          });
-          replyCore = `Wybrano restaurację ${chosen.name}. Chcesz zobaczyć menu?`;
+          updateSession(sessionId, { last_menu: shortlist, lastRestaurant: chosen, expectedContext: null });
+          replyCore = `Wybrano ${chosen.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln || m.price || 0).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
+        } catch (e) {
+          updateSession(sessionId, { lastRestaurant: chosen });
+          replyCore = `Wybrano ${chosen.name}. Nie mogę pobrać menu.`;
         }
         break;
       }
@@ -1231,6 +1411,22 @@ export default async function handler(req, res) {
         if (verifiedRestaurant) {
           updateSession(sessionId, { lastRestaurant: verifiedRestaurant });
           console.log(`✅ Restaurant set: ${verifiedRestaurant.name}`);
+        } else if (!verifiedRestaurant && parsed.restaurant) {
+          // Check if session lastRestaurant matches parsed.restaurant
+          const sessRest = getSession(sessionId)?.lastRestaurant;
+          if (sessRest && sessRest.name && parsed.restaurant &&
+            (sessRest.name.toLowerCase().includes(parsed.restaurant.toLowerCase()) ||
+              parsed.restaurant.toLowerCase().includes(sessRest.name.toLowerCase()))) {
+            console.log(`✅ Using session restaurant "${sessRest.name}" matching parsed "${parsed.restaurant}"`);
+            verifiedRestaurant = sessRest;
+          } else {
+            // Try findRestaurant one more time if not done above (already done in line 1408 but good to be safe/consistent)
+            verifiedRestaurant = await findRestaurant(parsed.restaurant);
+          }
+        }
+
+        if (verifiedRestaurant) {
+          updateSession(sessionId, { lastRestaurant: verifiedRestaurant });
         } else if (parsed.restaurant) {
           console.warn(`⚠️ Restaurant "${parsed.restaurant}" not found`);
 
@@ -1284,7 +1480,7 @@ export default async function handler(req, res) {
         const { data: menu, error } = await withDb(
           supabase
             .from("menu_items_v2")
-            .select("id, name, price_pln, available, category")
+            .select("*")
             .eq("restaurant_id", current.id)
             .eq("available", true)
             .order("name", { ascending: true })
@@ -1302,7 +1498,7 @@ export default async function handler(req, res) {
           const { data: menuAny, error: menuAnyErr } = await withDb(
             supabase
               .from("menu_items_v2")
-              .select("id, name, price_pln, available, category")
+              .select("*")
               .eq("restaurant_id", current.id)
               .order("name", { ascending: true })
               .limit(12)
@@ -1444,13 +1640,22 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
 
             // ===== PATCH: save pending order (BEGIN) =====
             try {
+
               // 🔍 Fetch menu for validation
               let menuCache = [];
-              const { data: menuData } = await supabase
+              const { data: menuData, error: menuErr } = await supabase
                 .from('menu_items_v2')
                 .select('id, name, price_pln, category, available')
                 .eq('restaurant_id', targetRestaurant.id);
-              if (menuData) menuCache = menuData;
+
+              if (menuErr) console.warn('⚠️ menu validation fetch error:', menuErr.message);
+
+              if (menuData) {
+                menuCache = menuData;
+                console.log(`🔍 [create_order] Loaded ${menuCache.length} items for validation`);
+              } else {
+                console.warn('⚠️ [create_order] Menu cache empty or failed to load.');
+              }
 
               const rawItems = (parsedOrder?.items) || (firstGroup?.items || []);
               const validatedItems = [];
@@ -1460,17 +1665,48 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
                 const globalSize = normalizeSize(text);
                 const globalExtras = normalizeExtras(text);
 
+                // 🧠 IMPROVED: Resolve name by ID if available (trust the parser)
+                let resolvedName = it.name || it.item_name;
+                let usedTrustedItem = false;
+
+                const exactMatchById = menuCache.find(m => m.id === (it.menuItemId || it.id));
+                if (exactMatchById) {
+                  resolvedName = exactMatchById.name;
+                } else if (!menuCache.length && it.menuItemId && it.price) {
+                  // TRUST MODE: If cache is empty but we have ID and Price from previous step (detectIntent), trust it.
+                  console.log(`🛡️ Trusting parsed item "${it.name}" because menu validation failed.`);
+                  validatedItems.push({
+                    id: it.menuItemId,
+                    name: it.name,
+                    price_pln: it.price,
+                    quantity: Number(it.qty || it.quantity || 1),
+                    selectedSize: it.size || globalSize,
+                    selectedExtras: it.extras ? [...it.extras, ...globalExtras] : globalExtras
+                  });
+                  usedTrustedItem = true;
+                }
+
+                if (usedTrustedItem) continue;
+
                 const candidate = {
-                  name: it.name || it.item_name,
+                  name: resolvedName,
                   quantity: Number(it.qty || it.quantity || 1),
                   size: it.size || globalSize,
                   extras: it.extras ? [...it.extras, ...globalExtras] : globalExtras
                 };
 
+                // Skip validation if we have empty cache? No, let validateOrderItem fail properly if we can't match.
+                // But passing empty cache will surely fail.
+                if (menuCache.length === 0) {
+                  validationIssues.push({ ok: false, reason: 'validation_offline', message: "Nie mogę potwierdzić dostępności tego dania w bazie. Spróbujmy jeszcze raz." });
+                  continue;
+                }
+
                 const valRes = validateOrderItem(candidate, menuCache);
                 if (valRes.ok) {
                   validatedItems.push(valRes.item);
                 } else {
+                  console.warn(`⚠️ Validation failed for "${candidate.name}": ${valRes.reason}`);
                   validationIssues.push(valRes);
                 }
               }
@@ -1602,30 +1838,30 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
 
           // FALLBACK: Stara logika (jeśli parsedOrder nie jest dostępny)
           // Jeśli w tekście padła nazwa restauracji, spróbuj ją znaleźć
-          let targetRestaurant = refinedRestaurant || null;
+          let targetRestaurantFallback = refinedRestaurant || null;
 
           // 🔹 Hybrid Smart Selection
-          if (!targetRestaurant) {
+          if (!targetRestaurantFallback) {
             try {
               const smartSel = await resolveRestaurantSelectionHybrid({ userText: text, sessionContext: currentSession });
               if (smartSel.restaurant) {
-                targetRestaurant = (currentSession.last_restaurants_list || []).find(r => r.id === smartSel.restaurant.id) || smartSel.restaurant;
-                console.log(`🧠 [create_order] Hybrid Selection used: ${targetRestaurant.name}`);
+                targetRestaurantFallback = (currentSession.last_restaurants_list || []).find(r => r.id === smartSel.restaurant.id) || smartSel.restaurant;
+                console.log(`🧠 [create_order] Hybrid Selection used: ${targetRestaurantFallback.name}`);
               }
             } catch (e) { }
           }
 
-          if (!targetRestaurant && parsed.restaurant) {
-            targetRestaurant = await findRestaurant(parsed.restaurant);
+          if (!targetRestaurantFallback && parsed.restaurant) {
+            targetRestaurantFallback = await findRestaurant(parsed.restaurant);
           }
 
-          if (targetRestaurant) {
-            updateSession(sessionId, { lastRestaurant: targetRestaurant });
-            console.log(`✅ Restaurant set: ${targetRestaurant.name}`);
+          if (targetRestaurantFallback) {
+            updateSession(sessionId, { lastRestaurant: targetRestaurantFallback });
+            console.log(`✅ Restaurant set: ${targetRestaurantFallback.name}`);
           }
 
           // Fallback do lastRestaurant z sesji
-          const current = targetRestaurant || getSession(sessionId)?.lastRestaurant;
+          const current = targetRestaurantFallback || getSession(sessionId)?.lastRestaurant;
           if (!current) {
             console.warn('⚠️ No restaurant in context');
 
@@ -1811,8 +2047,22 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
         // preferuj confirm_order jeśli czekamy na potwierdzenie (dla testu recovery)
         const s = getSession(sessionId) || {};
         if (s?.expectedContext === 'confirm_order' || s?.pendingOrder) {
-          replyCore = 'Potwierdzam. Dodać do koszyka?';
+          console.log('✅ confirm -> processing confirm_order logic');
+          const commitResult = commitPendingOrder(s);
+          console.log(commitResult.committed ? '✅ Order committed to cart' : '⚠️ No pending order to commit');
+
+          updateSession(sessionId, s);
+
+          replyCore = commitResult.committed ? "Dodaję do koszyka." : "Nic do potwierdzenia.";
+          meta = { ...(meta || {}), addedToCart: !!commitResult.committed, cart: commitResult.cart };
           intent = 'confirm_order';
+
+          if (commitResult.committed) {
+            const lastOrder = s.lastOrder || {};
+            const orderTotal = typeof lastOrder.total === 'number' ? lastOrder.total : Number(sum(lastOrder.items || []));
+            // Parsed order for meta response
+            meta.parsed_order = { items: lastOrder.items || [], total: orderTotal };
+          }
         } else if (prevRestaurant) {
           replyCore = `Super! Przechodzę do menu ${prevRestaurant.name}. Co chcesz zamówić?`;
         } else {
@@ -2178,56 +2428,32 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
       perf.ttsMs += (__ttsMs || 0);
       perf.durationMs = __durationMs;
       perf.dbMs += (__dbMsApprox || 0);
-      if (process.env.ENABLE_INTENT_LOGS === 'true' && process.env.NODE_ENV !== 'test') {
-        // fire-and-forget, try snake_case schema first, then camelCase fallback
-        const intentName = intent;
-        const replySnippet = String(reply || '').slice(0, 120);
-        const nluVal = Number(perf.nluMs || __nluMs || 0);
-        const dbVal = Number(perf.dbMs || __dbMsApprox || 0);
-        const ttsVal = Number(perf.ttsMs || __ttsMs || 0);
-        const durVal = Number(perf.durationMs || __durationMs || 0);
-        const fbVal = typeof fallback === 'boolean' ? fallback : (intentName === 'none');
-        const restId = (finalRestaurant && finalRestaurant.id) || (currentSession && currentSession.lastRestaurant && currentSession.lastRestaurant.id) || null;
-        const ordId = (meta && (meta.order_id || meta.orderId)) || null;
-
-        supabase.from('amber_intents').insert({
-          intent: intentName || 'unknown',
+      // ✅ V2 LOGGING: Capture response
+      if (process.env.NODE_ENV !== 'test') {
+        EventLogger.logEvent(sessionId, 'response_sent', {
+          intent: intent || 'unknown',
+          reply: (reply || '').slice(0, 2000),
           confidence: Number(confidence || 0),
-          fallback: fbVal,
-          reply_snippet: replySnippet,
-          nlu_ms: nluVal,
-          db_ms: dbVal,
-          tts_ms: ttsVal,
-          duration_ms: durVal,
-          created_at: new Date().toISOString(),
-          restaurant_id: restId,
-          order_id: ordId,
-        }).then(() => { }).catch(async (e1) => {
-          try {
-            await supabase.from('amber_intents').insert({
-              timestamp: new Date().toISOString(),
-              intent: intentName,
-              confidence: Number(confidence || 0),
-              fallback: fbVal,
-              replySnippet,
-              nluMs: nluVal,
-              dbMs: dbVal,
-              ttsMs: ttsVal,
-              durationMs: durVal,
-              restaurantId: restId,
-              orderId: ordId,
-            });
-          } catch (e2) {
-            console.error('❌ amber_intents insert failed:', e2.message);
+          fallback: !!fallback,
+          timings: {
+            nluMs: Number(perf.nluMs || __nluMs || 0),
+            dbMs: Number(perf.dbMs || __dbMsApprox || 0),
+            ttsMs: Number(perf.ttsMs || __ttsMs || 0),
+            totalMs: Number(perf.durationMs || __durationMs || 0)
+          },
+          meta: {
+            restaurant_id: (finalRestaurant?.id || currentSession?.lastRestaurant?.id),
+            reasoning: reasoningDecision
           }
-        });
+        }).catch(err => console.warn('⚠️ EventLogger (response) failed:', err.message));
       }
     } catch { }
 
     // 🔧 Attach structured data for frontend (ResultCarousel)
     const latestSession = getSession(sessionId);
     const restaurants = latestSession?.last_restaurants_list;
-    const menuItems = latestSession?.last_menu;
+    const menuItems = latestSession?.last_menu || latestSession?.lastMenu;
+    console.log(`📦 Final Response Preparation: MenuItems count = ${menuItems?.length || 0}`);
 
     // 🔧 FINALNY RESPONSE — ZAWSZE W TYM SAMYM FORMACIE
     const finalResponse = {
@@ -2265,20 +2491,39 @@ Spróbuj wybrać inną restaurację (np. numer lub nazwę).`;
     }
 
     // 🪵 Logging to brain_logs
-    logBrainEvent({
-      sessionId,
-      text,
-      normalizedText: normalizeTxt(text || ''),
+    // (Legacy logBrainEvent removed)
+
+    const wStep = mapWorkflowStep(intent);
+    const evtStatus = (reply && reply.toLowerCase().includes('błąd')) ? 'error' : 'success';
+
+    await EventLogger.logEvent(sessionId, 'intent_resolved', {
       intent,
-      confidence,
-      isFallback: !!fallback,
-      restaurantId: finalRestaurant?.id,
-      errorCode: null
-    });
+      reply: reply || replyCore,
+      confidence: hybridConfidence || 1,
+      source: hybridSource || 'unknown'
+    }, null, wStep, evtStatus);
+
+    await EventLogger.logEvent(sessionId, 'response_sent', {
+      intent,
+      timestamp: new Date().toISOString(),
+      meta
+    }, null, wStep, evtStatus);
+
+    // Zamykanie sesji sukcesem
+    if (intent === 'confirm_order' && evtStatus === 'success') {
+      await EventLogger.logConversation(sessionId, latestSession, 'closed');
+    }
 
     return res.status(200).json(finalResponse);
   } catch (err) {
     console.error("🧠 brainRouter error:", err);
+    const sid = req.body?.sessionId || 'unknown';
+    // Log error event
+    EventLogger.logEvent(sid, 'error_logged', { error: err.message }, null, 'error', 'error').catch(() => { });
+    // Close session with error status
+    if (sid !== 'unknown') {
+      EventLogger.logConversation(sid, {}, 'error').catch(() => { });
+    }
     return res.status(500).json({ ok: false, error: err.message });
   }
 }

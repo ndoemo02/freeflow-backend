@@ -1,6 +1,6 @@
 {
   "name": "freeflow-backend",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "main": "api/server-vercel.js",
@@ -26,6 +26,9 @@
     "test:summary": "node scripts/amber-test-summary.js",
     "test:parse": "node tests/test-parse.js",
     "test:brain": "node run-brain-tests.js",
+    "test:brain:e2e": "vitest run api/brain/tests/brainRouter.e2e.test.js",
+    "test:mc:direct": "vitest run api/brain/tests/monteCarlo_direct.e2e.test.js",
+    "test:mc:std": "vitest run api/brain/tests/monteCarlo_std.e2e.test.js",
     "test:orders": "npx vitest tests/orders-api.test.js --run"
   },
   "dependencies": {

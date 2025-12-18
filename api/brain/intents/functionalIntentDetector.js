@@ -50,11 +50,11 @@ const CONTINUE_ORDER_PATTERNS = [
  * Wzorce dla CONFIRM_ORDER (potwierdzenie zamówienia)
  */
 const CONFIRM_ORDER_PATTERNS = [
-  /\b(tak|potwierdzam|poprosz[ęe]|zamawiam|z[łl][óo][żz])\b/i,
+  /\b(tak|potwierdzam|z[łl][óo][żz])\b/i,
   /\b(jasne|ok|dobrze|pewnie)\b/i,
   /\b(potwierd[źz]|akceptuj[ęe])\b/i,
-  /^poprosz[ęe]$/i, // Tylko "poproszę" jako całe słowo
-  /\bpoprosz[ęe]\b/i // "poproszę" w tekście
+  /^(poprosz[ęe]|zamawiam)$/i, // "poproszę" / "zamawiam" tylko jako samodzielne słowo
+  /^(tak|jasne|ok|pewnie)[,!\s]+(poprosz[ęe]|zamawiam)$/i // "tak, poproszę"
 ];
 
 /**
@@ -97,7 +97,7 @@ export function detectFunctionalIntent(text, session = null) {
   // 1. CANCEL_ORDER (najwyższy priorytet - jeśli user mówi "nie", to znaczy "nie")
   // Sprawdź najpierw wyraźne wzorce anulowania (nie tylko "nie")
   const explicitCancelWords = ['anuluj', 'odwołaj', 'odwolaj', 'rezygnuję', 'rezygnuje', 'wycofuję', 'wycofuje'];
-  const hasExplicitCancel = explicitCancelWords.some(word => 
+  const hasExplicitCancel = explicitCancelWords.some(word =>
     originalLower.includes(word) || normalizedLower.includes(word.toLowerCase())
   );
 
@@ -123,9 +123,9 @@ export function detectFunctionalIntent(text, session = null) {
         };
       }
       // Jeśli nie ma kontekstu potwierdzenia, ale jest wyraźny wzorzec anulowania
-      if (/\b(anuluj|odwo[łl][aą][żz]|rezygnuj[ęe])\b/i.test(original) || 
-          /\b(anuluj|odwolaj|rezygnuje)\b/i.test(originalLower) ||
-          /\b(anuluj|odwolaj|rezygnuje)\b/i.test(normalizedLower)) {
+      if (/\b(anuluj|odwo[łl][aą][żz]|rezygnuj[ęe])\b/i.test(original) ||
+        /\b(anuluj|odwolaj|rezygnuje)\b/i.test(originalLower) ||
+        /\b(anuluj|odwolaj|rezygnuje)\b/i.test(normalizedLower)) {
         return {
           intent: FUNCTIONAL_INTENTS.CANCEL_ORDER,
           confidence: 0.9,

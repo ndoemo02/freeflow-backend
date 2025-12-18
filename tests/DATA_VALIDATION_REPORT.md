@@ -179,3 +179,6 @@ const mockCatalog = [
 
 **Status końcowy:** ✅ **Testy są przygotowane poprawnie i zgodne z danymi z Supabase**
 
+
+
+

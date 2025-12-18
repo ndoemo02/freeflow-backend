@@ -7,12 +7,10 @@ export function validateOrderItem(itemCandidate, restaurantMenu) {
         (m.name || '').toLowerCase() === (itemCandidate.name || '').toLowerCase()
     );
 
-    /* 
-    // TEMPORARY: FUZZY MATCH DISABLED
+    // TEMPORARY: FUZZY MATCH ENABLED
     if (!matched) {
-        matched = restaurantMenu.find(m => fuzzyMatch(itemCandidate.name, m.name, 3));
+        matched = restaurantMenu.find(m => fuzzyMatch(itemCandidate.name, m.name));
     }
-    */
 
     if (!matched) {
         // Suggest alternatives

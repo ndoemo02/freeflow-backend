@@ -248,6 +248,17 @@ app.get('/api/admin/brain-logs', async (req, res) => {
   catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// Conversations V2
+app.get('/api/admin/conversations', async (req, res) => {
+  try { const mod = await import('./admin/conversations.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.get('/api/admin/conversation', async (req, res) => {
+  try { const mod = await import('./admin/conversation.js'); return mod.default(req, res); }
+  catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // === FREEFUN ENDPOINTS ===
 app.get('/api/freefun/list', async (req, res) => {
   try { const mod = await import('./freefun/list.js'); return mod.default(req, res); }

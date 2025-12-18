@@ -239,6 +239,10 @@ app.post("/api/tts-chirp-stream", async (req, res) => {
 // === [8] DEBUG API ===
 app.use('/api', debugApi);
 
+// === [10] ADMIN API ===
+import adminRouter from "./api/admin/router.js";
+app.use('/api/admin', adminRouter);
+
 // === [9] WATCHDOG SYSTEM ===
 import { runWatchdog } from "./api/watchdog/core.js";
 
@@ -273,8 +277,8 @@ wss.on("connection", (ws) => {
   ws.on("close", () => console.log("❌ WebSocket disconnected"));
 
   // Wyślij wiadomość powitalną
-  ws.send(JSON.stringify({ 
-    ok: true, 
+  ws.send(JSON.stringify({
+    ok: true,
     message: "FreeFlow STT WebSocket ready",
     timestamp: new Date().toISOString()
   }));

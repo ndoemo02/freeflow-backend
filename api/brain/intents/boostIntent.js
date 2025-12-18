@@ -1,5 +1,4 @@
-
-import { normalizeTxt } from "./intentRouterGlue.js";
+import { normalizeTxt } from "../helpers.js";
 
 /**
  * Boosts intent based on strict expected context and short phrases.
@@ -10,6 +9,14 @@ import { normalizeTxt } from "./intentRouterGlue.js";
 export function boostIntent(det, text, session) {
   // 1. Jeśli brak session.expectedContext → zwróć det bez zmian.
   if (!session?.expectedContext) {
+    return det;
+  }
+
+  // 1b. Jeśli już wykryto konkretne zamówienie (create_order) przez parser,
+  // NIE zmieniaj go na potwierdzenie, nawet jeśli kontekst na to pozwala.
+  const currentIntent = typeof det === 'object' ? det.intent : det;
+  if (currentIntent === 'create_order' || currentIntent === 'add_to_cart') {
+    console.log(`ℹ️ boostIntent: Skipping boost, already detected order intent: ${currentIntent}`);
     return det;
   }
 
@@ -44,12 +51,13 @@ export function boostIntent(det, text, session) {
   const ctx = session.expectedContext;
   const lower = normalizeTxt(text || "");
 
-  // Limit words check (<= 5 words)
+  // Limit words check (<= 12 words) to avoid false positives on long rants,
+  // but allow "chętnie zobaczę co mają w menu" (6-7 words).
   const words = lower.split(/\s+/).length;
-  if (words > 5) return det;
+  if (words > 12) return det;
 
   // 3. Confirm Menu
-  if (ctx === 'confirm_menu' || ctx === 'show_menu') { // Alias show_menu for safety
+  if (ctx === 'confirm_menu' || ctx === 'menu_request') { // Map consistently
     const confirmPhrases = ["tak", "tak pokaz", "tak pokaż", "chetnie", "chętnie", "chetnie zobacze", "chętnie zobaczę", "pokaz", "pokaż", "tak pokaz", "tak, pokaz", "jasne", "z przyjemnoscia", "z przyjemnością"];
 
     // Check strict match or inclusion for short phrases
@@ -59,7 +67,7 @@ export function boostIntent(det, text, session) {
         // Preserve other props if det is object (spread first)
         ...(typeof det === 'object' ? det : {}),
         // Then override with boosted values
-        intent: 'show_menu',
+        intent: 'menu_request',
         confidence: 0.99,
         boosted: true
       };
@@ -89,14 +97,14 @@ export function boostIntent(det, text, session) {
   }
 
   // 4. Confirm Choice
-  if (ctx === 'confirm_choice') {
+  if (ctx === 'confirm_choice' || ctx === 'confirm_order') {
     const confirmPhrases = ["tak", "potwierdzam", "poprosze", "poproszę", "jasne", "ok", "dobrze", "pewnie"];
     if (confirmPhrases.some(p => lower.includes(p))) {
       return {
         // Preserve other props if det is object (spread first)
         ...(typeof det === 'object' ? det : {}),
         // Then override with boosted values
-        intent: 'confirm', // or 'confirm_order'? User said 'confirm'.
+        intent: 'confirm_order',
         confidence: 0.99,
         boosted: true
       };

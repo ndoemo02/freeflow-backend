@@ -100,16 +100,59 @@ export function fuzzyMatch(a, b, threshold = 3) {
 
 export function fuzzyIncludes(name, text) {
   if (!name || !text) return false;
-  const n = normalizeTxt(name);
-  const t = normalizeTxt(text);
-  if (t.includes(n)) return true;
-  
-  const toks = n.split(' ').filter(Boolean);
-  const long = toks.filter(tok => tok.length > 2);
-  const hits = long.filter(tok => t.includes(tok));
-  
-  if (long.length <= 1) return hits.length >= 1;
-  return hits.length / long.length >= 0.6;
+  const n = normalizeTxt(name); // Menu Item
+  const t = normalizeTxt(text); // User Request
+
+  // 1. Exact / Substring match (Fast)
+  if (t.includes(n) || n.includes(t)) return true;
+
+  const nToks = n.split(' ').filter(x => x.length > 1);
+  const tToks = t.split(' ').filter(x => x.length > 1);
+
+  // Helper: check if token 'query' exists in 'targetArray' loosely
+  const hasToken = (query, targetArray) => {
+    return targetArray.some(target => {
+      if (target.includes(query) || query.includes(target)) return true;
+      // Allow 1-2 char diff for inflections on longer words
+      if (query.length > 3 && target.length > 3) {
+        return levenshtein(query, target) <= 2;
+      }
+      return false;
+    });
+  };
+
+  // 2. Forward Check: Does User Text cover enough of Menu Item? (e.g. User says full name)
+  // Penalize long menu names if user only said one word, UNLESS that word is very unique?
+  // Current logic: requires 60% of menu tokens.
+  const nLong = nToks.filter(tok => tok.length > 2);
+  if (nLong.length > 0) {
+    const hits = nLong.filter(tok => hasToken(tok, tToks));
+    if (hits.length / nLong.length >= 0.6) return true;
+  }
+
+  // 3. Reverse Check: Does Menu Item cover enough of User Request? (Shorthand / "Pizza")
+  // User: "Burger" -> Menu: "Burger Klasyczny" (Match)
+  // User: "Pomidorowa" -> Menu: "Zupa Pomidorowa" (Match)
+  const tLong = tToks.filter(tok => tok.length > 2);
+
+  // Guard: Don't match generic 3-letter words blindly if that's all there is
+  if (tLong.length === 0) return false;
+
+  const matchedUserTokens = tLong.filter(tok => hasToken(tok, nToks));
+  const userCoverage = matchedUserTokens.length / tLong.length;
+
+  // If user said 1 strong word (e.g. "pomidorowa"), and it matches -> 100% -> OK.
+  // If user said "zupę pomidorową" (2 words), and both match -> 100% -> OK.
+  // Threshold: 0.75 allows "zupa pomidorowa szybka" (2/3 match)
+  if (userCoverage >= 0.75) return true;
+
+  // 4. Special Case: Single significant token match (e.g. "Schabowy")
+  // If user provided single significant word that matches perfectly/strongly a significant word in menu
+  if (tLong.length === 1 && nToks.length > 0) {
+    if (hasToken(tLong[0], nToks)) return true;
+  }
+
+  return false;
 }
 
 // ============================================================================
@@ -133,31 +176,31 @@ const QTY_WORDS = {
 export function extractQuantity(text) {
   if (!text) return 1;
   const normalized = normalizeTxt(text);
-  
+
   // Pattern 1: Numbers (2x, 3x, 2 razy)
   const numPattern = /(\d+)\s*(?:x|razy|sztuk|porcj)/i;
   const numMatch = normalized.match(numPattern);
   if (numMatch) return parseInt(numMatch[1], 10);
-  
+
   // Pattern 2: Word form
   for (const [word, qty] of Object.entries(QTY_WORDS)) {
     if (normalized.includes(word)) return qty;
   }
-  
+
   return 1;
 }
 
 export function extractSize(text = '') {
   if (!text) return null;
   const s = normalizeTxt(text);
-  
+
   const m = s.match(/\b(26|28|30|31|32|40)\s*(cm)?\b/);
   if (m) return parseInt(m[1], 10);
-  
+
   if (/\b(mala|mała|small)\b/.test(s)) return 26;
   if (/\b(srednia|średnia|medium)\b/.test(s)) return 32;
   if (/\b(duza|duża|large)\b/.test(s)) return 40;
-  
+
   return null;
 }
 
@@ -169,9 +212,9 @@ export function extractLocation(text) {
   const locationKeywords = ['w', 'na', 'blisko', 'koło', 'niedaleko', 'obok', 'przy'];
   const pattern = new RegExp(`(?:${locationKeywords.join('|')})\\s+([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+(?:\\s+[A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż]+)*)`, 'i');
   const match = text.match(pattern);
-  
+
   let location = null;
-  
+
   if (match) {
     location = match[1]?.trim();
   } else {
@@ -183,16 +226,16 @@ export function extractLocation(text) {
       location = cities[cities.length - 1];
     }
   }
-  
+
   if (!location) return null;
-  
+
   const blacklist = ['tutaj', 'tu', 'szybko', 'pobliżu', 'okolicy', 'menu', 'coś', 'cos', 'azjatyckiego', 'azjatyckie', 'szybkiego', 'dobrego', 'innego', 'Zamów', 'Pokaż', 'Znajdź', 'Chcę'];
   const locationLower = location.toLowerCase();
-  
+
   if (blacklist.includes(locationLower) || blacklist.some(word => locationLower.startsWith(word + ' '))) {
     return null;
   }
-  
+
   // Normalize case endings for Polish cities
   // 🔧 Obsługa złożonych nazw (np. "Piekarach Śląskich" → "Piekary Śląskie")
   location = location
@@ -225,7 +268,7 @@ export function extractLocation(text) {
       return word;
     })
     .join(' ');
-  
+
   return location;
 }
 

@@ -1,12 +1,15 @@
 import { supabase } from "../../_supabase.js";
-// Using local safe normalization instead of the destructive global util
-// import { normalize } from "../utils/normalizeText.js";
 
 // FAZA 2 — Alias map (deterministyczne)
 const ALIAS_MAP = {
   "cola": "coca-cola",
   "pepsi": "pepsi",
-  "frytki": "fries"
+  "frytki": "fries",
+  "burger": "burger",
+  "burgery": "burger",
+  "vegas": "smak vegas",
+  "margherita": "margherita",
+  "margheritę": "margherita"
 };
 
 function normalize(text) {
@@ -22,11 +25,21 @@ function normalize(text) {
   return s;
 }
 
+export function fuzzyIncludes(name, text) {
+  if (!name || !text) return false;
+  const n = normalize(name);
+  const t = normalize(text);
+  if (t.includes(n) || n.includes(t)) return true;
+
+  // Słowa z nazwy dania (np. "Burger") muszą być w tekście
+  const nWords = n.split(' ').filter(w => w.length > 2);
+  const tWords = t.split(' ').filter(w => w.length > 2);
+  return nWords.some(nw => tWords.some(tw => tw.includes(nw) || nw.includes(tw)));
+}
+
 export function normalizeDishText(text) {
   return normalize(text);
 }
-
-// Removed aggressive Levenshtein logic to stabilize Intent Detection
 
 export function parseRestaurantAndDish(text) {
   const normalized = text.toLowerCase();
@@ -36,6 +49,24 @@ export function parseRestaurantAndDish(text) {
     return { dish: null, restaurant: null };
   }
 
+  // Pattern for "Zamów [danie]" (no restaurant name in text)
+  const simpleOrderPattern = /(?:zamów|poproszę|chcę|poproszę\s+o)\s+([a-ząćęłńóśźż\d\s]+)$/i;
+  const simpleMatch = text.match(simpleOrderPattern);
+  if (simpleMatch) {
+    let dish = simpleMatch[1]?.trim();
+    // Remove common quantity words to get clean dish name
+    const qtyWords = ['jeden', 'jedna', 'jedno', 'dwa', 'dwie', 'trzy', 'cztery', 'pięć', 'dziesięć', 'kilka', 'pare'];
+    for (const w of qtyWords) {
+      const re = new RegExp(`\\b${w}\\b`, 'gi');
+      dish = dish.replace(re, '').trim();
+    }
+    // Remove numbers like "2", "2x"
+    dish = dish.replace(/\b\d+\s*(x|razy)?\b/gi, '').trim();
+    if (dish && dish.length > 1) {
+      return { dish, restaurant: null };
+    }
+  }
+
   // Pattern 1: "Zamów [danie] [nazwa restauracji]"
   const orderPattern = /(?:zamów|poproszę|chcę)\s+([a-ząćęłńóśźż\s]+?)\s+([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż\s]+)/i;
   const orderMatch = text.match(orderPattern);
@@ -43,7 +74,14 @@ export function parseRestaurantAndDish(text) {
     let dish = orderMatch[1]?.trim();
     // Normalizuj dopełniacz → mianownik (pizzę → pizza, burgerę → burger)
     dish = dish?.replace(/ę$/i, 'a').replace(/a$/i, 'a');
-    return { dish, restaurant: orderMatch[2]?.trim() };
+    // Clean dish from quantity
+    const qtyWords = ['jeden', 'jedna', 'jedno', 'dwa', 'dwie', 'trzy', 'cztery', 'pięć', 'dziesięć', 'kilka', 'pare'];
+    for (const w of qtyWords) {
+      const re = new RegExp(`\\b${w}\\b`, 'gi');
+      dish = dish.replace(re, '').trim();
+    }
+    dish = dish?.replace(/\b\d+\s*(x|razy)?\b/gi, '').trim();
+    return { dish: dish || null, restaurant: orderMatch[2]?.trim() };
   }
 
   // Pattern 2: "Pokaż menu [nazwa restauracji]"
@@ -131,7 +169,8 @@ export async function findDishInMenu(restaurantId, dishName) {
     // FAZA 2: Alias Map
     for (const [alias, realName] of Object.entries(ALIAS_MAP)) {
       if (normalizedDish.includes(alias) || alias === normalizedDish) {
-        matched = menu.find(item => normalize(item.name) === normalize(realName));
+        const normRealName = normalize(realName);
+        matched = menu.find(item => normalize(item.name).includes(normRealName));
         if (matched) {
           console.log(`✅ Alias match (Phase 2): "${dishName}" matches alias "${alias}" → ${matched.name}`);
           return matched;
@@ -179,12 +218,8 @@ export async function parseOrderItems(text, restaurantId) {
     const quantity = extractQuantity(text);
 
     // FAZA 1 — Twarde tokeny (znane produkty z menu)
-    // Sprawdź czy nazwa dania z menu występuje w tekście
     for (const menuItem of menu) {
-      const dishName = normalize(menuItem.name);
-
-      // Strict inclusion check instead of fuzzy
-      if (normalized.includes(dishName)) {
+      if (fuzzyIncludes(menuItem.name, text)) {
         items.push({
           id: menuItem.id,
           name: menuItem.name,
@@ -198,13 +233,10 @@ export async function parseOrderItems(text, restaurantId) {
     // FAZA 2 — Alias map
     if (items.length === 0) {
       for (const [alias, realName] of Object.entries(ALIAS_MAP)) {
-        // Use word boundary for aliases to avoid "s" matching "sand" etc. if alias is short
-        // But for "cola" vs "coca-cola", simple include might be okay, but regex is safer.
         if (normalized.includes(alias)) {
-          const targetItem = menu.find(m => normalize(m.name).includes(normalize(realName)) || normalize(realName).includes(normalize(m.name)));
+          const normRealName = normalize(realName);
+          const targetItem = menu.find(m => normalize(m.name).includes(normRealName));
           if (targetItem) {
-            // Check if already added to avoid duplicates if Phase 1 somehow missed it but Phase 2 caught it
-            // (Though we only enter here if items.length === 0, or we can allow multiple)
             if (!items.find(i => i.id === targetItem.id)) {
               items.push({
                 id: targetItem.id,
@@ -219,6 +251,30 @@ export async function parseOrderItems(text, restaurantId) {
       }
     }
 
+    // FAZA 3 — Category/BaseType match (np. "burger" -> znajdź dowolnego burgera w tej restauracji)
+    if (items.length === 0) {
+      const genericKeywords = ["burger", "pizza", "kebab", "zupa", "napoj", "napój", "frytki"];
+      for (const kw of genericKeywords) {
+        if (normalized.includes(kw)) {
+          const matchedItem = menu.find(m =>
+            normalize(m.category || "").includes(kw) ||
+            normalize(m.base_type || "").includes(kw) ||
+            normalize(m.name).includes(kw)
+          );
+          if (matchedItem) {
+            items.push({
+              id: matchedItem.id,
+              name: matchedItem.name,
+              price: parseFloat(matchedItem.price_pln),
+              quantity: quantity
+            });
+            console.log(`✅ Found dish via Category/Generic match (Phase 3): "${matchedItem.name}" (qty: ${quantity})`);
+            break;
+          }
+        }
+      }
+    }
+
     // Jeśli znaleziono, zwróć
     if (items.length > 0) {
       console.log(`🛒 Parsed ${items.length} items:`, items);
@@ -228,7 +284,6 @@ export async function parseOrderItems(text, restaurantId) {
     // Fallback logic -> Try to extract generic dish name
     const parsed = parseRestaurantAndDish(text);
     if (parsed.dish) {
-      // One last checks against menu using findDishInMenu (which also uses alias now)
       const matched = await findDishInMenu(restaurantId, parsed.dish);
       if (matched) {
         items.push({
@@ -239,11 +294,10 @@ export async function parseOrderItems(text, restaurantId) {
         });
         return items;
       } else {
-        // NIE FAILUJ -> Zwróć unknown_item
         console.log(`⚠️ Parsed dish "${parsed.dish}" but not found in menu. Returning unknown_item.`);
         return [{
           id: 'unknown_item',
-          name: parsed.dish, // extracted text
+          name: parsed.dish,
           price: 0,
           quantity: quantity,
           isUnknown: true
@@ -257,4 +311,3 @@ export async function parseOrderItems(text, restaurantId) {
     return [];
   }
 }
-

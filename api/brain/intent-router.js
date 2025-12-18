@@ -19,10 +19,10 @@ import {
 export { normalize, stripDiacritics, normalizeTxt, extractQuantity, extractSize };
 
 // Import functional intent detector (ETAP 1)
-import { 
-  detectFunctionalIntent, 
+import {
+  detectFunctionalIntent,
   FUNCTIONAL_INTENTS,
-  isFunctionalIntent 
+  isFunctionalIntent
 } from './intents/functionalIntentDetector.js';
 
 let aliasCache = { value: {}, ts: 0 };
@@ -63,7 +63,7 @@ function baseDishKey(name) {
   return n;
 }
 
-function dedupHitsByBase(hits, preferredSize=null) {
+function dedupHitsByBase(hits, preferredSize = null) {
   const groups = new Map();
   for (const h of hits) {
     const key = `${h.restaurant_id}::${baseDishKey(h.name)}`;
@@ -181,17 +181,29 @@ const NAME_ALIASES = {
 const DETERMINISTIC_ALIAS_MAP = {
   // Napoje
   'cola': 'coca-cola',
+  'kola': 'coca-cola',
+  'kole': 'coca-cola',
+  'kolę': 'coca-cola',
   'pepsi max': 'pepsi-max',
   'pepsi': 'pepsi',
-  
+
   // Frytki
   'frytki': 'fries',
+  'frytek': 'fries',
+  'frytkami': 'fries',
   'małe frytki': 'fries_small',
   'duże frytki': 'fries_large',
-  
+
+  // Burgery
+  'burger': 'burger',
+  'burgera': 'burger',
+  'burgery': 'burger',
+  'vegas': 'smak vegas',
+
   // Pizza (zachowane z NAME_ALIASES dla kompatybilności)
   'margherita': 'pizza margherita',
   'margherite': 'pizza margherita',
+  'margheritę': 'pizza margherita',
   'margerita': 'pizza margherita',
   'margarita': 'pizza margherita',
   'pepperoni': 'pizza pepperoni',
@@ -199,10 +211,11 @@ const DETERMINISTIC_ALIAS_MAP = {
   'diavola': 'pizza diavola',
   'diabolo': 'pizza diavola',
   'diabola': 'pizza diavola',
-  
+
   // Inne (zachowane z NAME_ALIASES)
   'burger': 'burger',
   'burgera': 'burger',
+  'burgery': 'burger',
   'czosnkowa': 'zupa czosnkowa',
   'zurek': 'żurek śląski',
   'schabowy': 'kotlet schabowy',
@@ -380,14 +393,14 @@ function extractRequestedItems(text) {
   // Wyodrębnij żądane pozycje z tekstu (proste rozpoznawanie po aliasach i nazwach)
   const normalized = normalizeTxt(text);
   const requestedSet = new Set();
-  
+
   // Sprawdź aliasy
   for (const [alias, fullName] of Object.entries(NAME_ALIASES)) {
     if (normalized.includes(alias)) {
       requestedSet.add(fullName);
     }
   }
-  
+
   return Array.from(requestedSet).map(name => ({ name }));
 }
 
@@ -427,7 +440,7 @@ export function parseOrderItems(text, catalog) {
   // Bezpieczne zastosowanie aliasów (nie throw)
   let textAliased;
   let unknownItems = [];
-  
+
   try {
     textAliased = applyAliases(text);
     // Jeśli applyAliases zwróciło oryginał i nie znalazło aliasu,
@@ -435,7 +448,7 @@ export function parseOrderItems(text, catalog) {
     if (textAliased === text) {
       // Sprawdź czy tekst nie pasuje do żadnego aliasu
       const normalized = normalizeTxt(text);
-      const hasKnownAlias = Object.keys(DETERMINISTIC_ALIAS_MAP).some(alias => 
+      const hasKnownAlias = Object.keys(DETERMINISTIC_ALIAS_MAP).some(alias =>
         normalized.includes(normalizeTxt(alias))
       );
       if (!hasKnownAlias && text.trim().length > 0) {
@@ -532,7 +545,7 @@ export function parseOrderItems(text, catalog) {
       return false;
     }
   });
-  
+
   const requestedNames = (requestedItems || []).map(i => {
     try {
       return i && i.name ? i.name.toLowerCase() : '';
@@ -540,7 +553,7 @@ export function parseOrderItems(text, catalog) {
       return '';
     }
   }).filter(Boolean);
-  
+
   const availableNames = matched.map(m => {
     try {
       return m && m.name ? m.name.toLowerCase() : '';
@@ -592,10 +605,10 @@ export function parseOrderItems(text, catalog) {
       if (!h || !h.restaurant_id) continue; // Pomiń nieprawidłowe hitów
       const restaurantId = h.restaurant_id;
       if (!byR[restaurantId]) {
-        byR[restaurantId] = { 
-          restaurant_id: restaurantId, 
-          restaurant_name: h.restaurant_name || 'Unknown', 
-          items: [] 
+        byR[restaurantId] = {
+          restaurant_id: restaurantId,
+          restaurant_name: h.restaurant_name || 'Unknown',
+          items: []
         };
       }
       byR[restaurantId].items.push({
@@ -678,10 +691,10 @@ export async function detectIntent(text, session = null) {
   // Bezpieczny fallback dla pustego inputu
   if (!text || typeof text !== 'string' || !text.trim()) {
     const fallback = safeFallbackIntent(text, 'empty_input');
-    updateDebugSession({ 
-      intent: fallback.intent, 
-      restaurant: null, 
-      sessionId: session?.id || null 
+    updateDebugSession({
+      intent: fallback.intent,
+      restaurant: null,
+      sessionId: session?.id || null
     });
     return fallback;
   }
@@ -692,30 +705,30 @@ export async function detectIntent(text, session = null) {
     // ==========================================
     // Wykryj intencję NA PODSTAWIE ZAMIARU, nie frazy
     const functionalIntent = detectFunctionalIntent(text, session);
-    
+
     // Jeśli wykryto funkcjonalny intent (ADD_ITEM, CONTINUE_ORDER, etc.)
     // i ma wysoką pewność, zwróć go od razu (bez parsowania treści)
     if (isFunctionalIntent(functionalIntent.intent) && functionalIntent.confidence >= 0.85) {
       console.log(`[intent-router] ✅ Functional intent detected: ${functionalIntent.intent} (confidence: ${functionalIntent.confidence})`);
-      
+
       // Mapuj funkcjonalne intenty na intenty używane w systemie
       let mappedIntent = functionalIntent.intent;
       if (functionalIntent.intent === FUNCTIONAL_INTENTS.CONFIRM_ORDER) {
         mappedIntent = 'confirm_order';
       } else if (functionalIntent.intent === FUNCTIONAL_INTENTS.CANCEL_ORDER) {
         mappedIntent = 'cancel_order';
-      } else if (functionalIntent.intent === FUNCTIONAL_INTENTS.ADD_ITEM || 
-                 functionalIntent.intent === FUNCTIONAL_INTENTS.CONTINUE_ORDER) {
+      } else if (functionalIntent.intent === FUNCTIONAL_INTENTS.ADD_ITEM ||
+        functionalIntent.intent === FUNCTIONAL_INTENTS.CONTINUE_ORDER) {
         mappedIntent = 'create_order'; // ADD_ITEM i CONTINUE_ORDER → create_order
       }
-      
+
       updateDebugSession({
         intent: mappedIntent,
         restaurant: null,
         sessionId: session?.id || null,
         confidence: functionalIntent.confidence
       });
-      
+
       return {
         intent: mappedIntent,
         confidence: functionalIntent.confidence,
@@ -905,6 +918,21 @@ export async function detectIntent(text, session = null) {
             return { intent: 'create_order', parsedOrder: parsed };
           }
           const missing = parsed.unavailable.join(', ');
+
+          // 🔹 PRIORITY CHECK: Before returning clarify_order, check if this is actually a "find_nearby" intent
+          // (e.g. user said "pokaż restauracje w okolicy", parser thought "restauracje w okolicy" is an item)
+          const strongNearbyKeywords = ['w okolicy', 'w poblizu', 'blisko', 'restauracje', 'gdzie zjem', 'szukam'];
+          if (strongNearbyKeywords.some(k => lower.includes(k))) {
+            console.log(`[intent-router] ⚠️ Unavailable items detected, BUT text contains strong "find_nearby" keywords. Prioritizing find_nearby.`);
+            updateDebugSession({
+              intent: 'find_nearby',
+              restaurant: null,
+              sessionId: session?.id || null,
+              confidence: 0.85
+            });
+            return { intent: 'find_nearby', restaurant: null };
+          }
+
           const restaurantName = session?.lastRestaurant?.name || 'tym menu';
           console.log(`⚠️ Unavailable items detected: ${missing} in ${restaurantName}`);
 
@@ -1013,8 +1041,7 @@ export async function detectIntent(text, session = null) {
 
     const orderKeywords = [
       'zamow', 'poprosze', 'prosze', 'chce zamowic', 'zloz zamowienie', 'zamowic cos',
-      'dodaj do zamowienia', 'zloz', 'wybieram', 'biore', 'wezme'
-      // Usunięto 'chce' — zbyt ogólne, koliduje z "chce cos szybkiego" (find_nearby)
+      'dodaj do zamowienia', 'zloz', 'wybieram', 'biore', 'wezme', 'chce', 'chcę'
     ];
 
     // Pobierz nauczone frazy z bazy
@@ -1056,23 +1083,23 @@ export async function detectIntent(text, session = null) {
         });
         return { intent: 'menu_request', restaurant: targetRestaurant };
       }
-      
+
       const hasPizzaKeywordTR = /\bpizz/i.test(lower);
       if (allOrderKeywords.some(k => lower.includes(k)) || hasPizzaKeywordTR) {
         console.log(`[intent-router] ✅ Order keyword found, returning create_order`);
-        updateDebugSession({ 
-          intent: 'create_order', 
+        updateDebugSession({
+          intent: 'create_order',
           restaurant: targetRestaurant.name,
           sessionId: session?.id || null,
           confidence: 0.9
         });
         return { intent: 'create_order', restaurant: targetRestaurant };
       }
-      
+
       // W przeciwnym razie → select_restaurant
       console.log(`[intent-router] ✅ No specific keywords, returning select_restaurant`);
-      updateDebugSession({ 
-        intent: 'select_restaurant', 
+      updateDebugSession({
+        intent: 'select_restaurant',
         restaurant: targetRestaurant.name,
         sessionId: session?.id || null,
         confidence: 0.9
@@ -1086,8 +1113,8 @@ export async function detectIntent(text, session = null) {
 
     // 🔹 Szybka reguła: „w okolicy / w pobliżu / blisko” → preferuj find_nearby
     if (/\b(w pobliżu|w poblizu|w okolicy|blisko)\b/i.test(lower)) {
-      updateDebugSession({ 
-        intent: 'find_nearby', 
+      updateDebugSession({
+        intent: 'find_nearby',
         restaurant: null,
         sessionId: session?.id || null,
         confidence: 0.85
@@ -1110,7 +1137,7 @@ export async function detectIntent(text, session = null) {
     const hasOrderKeyword = allOrderKeywords.some(k => lower.includes(k));
     const hasPizzaKeyword = /\bpizz/i.test(lower); // pizza/pizze/pizzy/pizzę etc.
     const hasDishKeyword = /(margher|margarit|capric|diavol|hawaj|hawai|funghi|prosciut|salami|pepperoni|quattro|formagg|stagioni|parma|tonno|romana|vege|wegetar|carbonar)/i.test(lower);
-    
+
     if (hasLastRestaurant && (hasOrderKeyword || hasPizzaKeyword || hasDishKeyword)) {
       console.log('🎯 PRIORYTET 0.5: lastRestaurant exists + order keyword detected → skip restaurant search');
       console.log(`   Using session restaurant: ${session.lastRestaurant.name}`);
@@ -1184,8 +1211,8 @@ export async function detectIntent(text, session = null) {
           console.log('✅ Fuzzy match found:', r.name);
           // Jeśli jest "menu" → menu_request
           if (allMenuKeywords.some(k => lower.includes(k))) {
-            updateDebugSession({ 
-              intent: 'menu_request', 
+            updateDebugSession({
+              intent: 'menu_request',
               restaurant: r.name,
               sessionId: session?.id || null,
               confidence: 0.9
@@ -1194,8 +1221,8 @@ export async function detectIntent(text, session = null) {
           }
           // Jeśli jest "zamów"/"wybieram" → create_order
           if (allOrderKeywords.some(k => lower.includes(k))) {
-            updateDebugSession({ 
-              intent: 'create_order', 
+            updateDebugSession({
+              intent: 'create_order',
               restaurant: r.name,
               sessionId: session?.id || null,
               confidence: 0.9
@@ -1203,8 +1230,8 @@ export async function detectIntent(text, session = null) {
             return { intent: 'create_order', restaurant: r };
           }
           // W przeciwnym razie → select_restaurant
-          updateDebugSession({ 
-            intent: 'select_restaurant', 
+          updateDebugSession({
+            intent: 'select_restaurant',
             restaurant: r.name,
             sessionId: session?.id || null,
             confidence: 0.9
@@ -1216,8 +1243,8 @@ export async function detectIntent(text, session = null) {
 
     // 🔹 PRIORYTET 2: Sprawdź menu keywords (bardziej specyficzne niż order)
     if (allMenuKeywords.some(k => lower.includes(k))) {
-      updateDebugSession({ 
-        intent: 'menu_request', 
+      updateDebugSession({
+        intent: 'menu_request',
         restaurant: null,
         sessionId: session?.id || null,
         confidence: 0.8
@@ -1227,8 +1254,8 @@ export async function detectIntent(text, session = null) {
 
     // 🔹 PRIORYTET 3: Sprawdź order keywords
     if (allOrderKeywords.some(k => lower.includes(k))) {
-      updateDebugSession({ 
-        intent: 'create_order', 
+      updateDebugSession({
+        intent: 'create_order',
         restaurant: null,
         sessionId: session?.id || null,
         confidence: 0.8
@@ -1241,14 +1268,14 @@ export async function detectIntent(text, session = null) {
     console.log('[intent-router] Text:', text);
     console.log('[intent-router] Normalized:', lower);
     console.log('[intent-router] All nearby keywords:', allNearbyKeywords);
-    
+
     const matchingKeywords = allNearbyKeywords.filter(k => lower.includes(k));
     console.log('[intent-router] Matching keywords:', matchingKeywords);
-    
+
     if (matchingKeywords.length > 0) {
       console.log('[intent-router] ✅ Found nearby intent!');
-      updateDebugSession({ 
-        intent: 'find_nearby', 
+      updateDebugSession({
+        intent: 'find_nearby',
         restaurant: null,
         sessionId: session?.id || null,
         confidence: 0.8
@@ -1265,8 +1292,8 @@ export async function detectIntent(text, session = null) {
 
     // Bezpieczny fallback - zawsze zwróć jakiś intent (NIE 'none')
     const fallback = safeFallbackIntent(text, 'no_keywords_matched');
-    updateDebugSession({ 
-      intent: fallback.intent, 
+    updateDebugSession({
+      intent: fallback.intent,
       restaurant: null,
       sessionId: session?.id || null,
       confidence: 0.0
@@ -1276,8 +1303,8 @@ export async function detectIntent(text, session = null) {
     console.error('🧠 detectIntent error:', err.message);
     // Bezpieczny fallback - zawsze zwróć jakiś intent (NIE throw, NIE crash)
     const fallback = safeFallbackIntent(text, `error_in_detection: ${err.message}`);
-    updateDebugSession({ 
-      intent: fallback.intent, 
+    updateDebugSession({
+      intent: fallback.intent,
       restaurant: null,
       sessionId: session?.id || null,
       confidence: 0.0
