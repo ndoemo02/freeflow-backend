@@ -792,18 +792,26 @@ export async function detectIntent(text, session = null) {
       console.log(`[intent-router] 🔍 Searching for restaurant in text (reason: ${!hasSessionRestaurant ? 'no session restaurant' : 'has indicators'})`);
 
       try {
-        // 🔹 Timeout protection: 3s max dla query
-        const restaurantsQuery = supabase
-          .from('restaurants')
-          .select('id, name');
+        // 🔹 Optimization: If we are in selection mode, restrict search to the list from session
+        const isSelectionMode = session?.expectedContext === 'select_restaurant' || session?.expectedContext === 'confirm_show_restaurants_city';
+        const sessionList = session?.lastRestaurants || session?.last_restaurants_list;
 
-        const { data } = await withTimeout(
-          restaurantsQuery,
-          3000,
-          'restaurants query in detectIntent'
-        );
+        if (isSelectionMode && Array.isArray(sessionList) && sessionList.length > 0) {
+          console.log(`[intent-router] 🎯 Restricted search to ${sessionList.length} restaurants from session`);
+          restaurantsList = sessionList;
+        } else {
+          // 🔹 Timeout protection: 3s max dla query
+          const restaurantsQuery = supabase
+            .from('restaurants')
+            .select('id, name');
 
-        restaurantsList = data; // 🔹 Zapisz do cache
+          const { data } = await withTimeout(
+            restaurantsQuery,
+            3000,
+            'restaurants query in detectIntent'
+          );
+          restaurantsList = data; // 🔹 Zapisz do cache
+        }
 
         if (restaurantsList?.length) {
           console.log(`[intent-router] 🔍 Checking ${restaurantsList.length} restaurants for fuzzy match`);

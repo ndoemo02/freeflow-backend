@@ -324,7 +324,10 @@ export default async function handler(req, res) {
     const geoLocation = (isActionRequest && !hasLocationPreposition) ? null : geoLocationRaw;
     const geoCuisineType = extractCuisineType(text);
 
-    if (geoLocation) {
+    // 🛑 GUARD: Block GeoContext if user is already selecting a restaurant from a list
+    const isSelectingFromList = session?.expectedContext === 'select_restaurant' || session?.expectedContext === 'confirm_show_restaurants_city';
+
+    if (geoLocation && !isSelectingFromList) {
       console.log(`🧭 GeoContext Layer activated for: "${geoLocation}"${geoCuisineType ? ` (cuisine: ${geoCuisineType})` : ''}`);
       const session = getSession(sessionId);
       const __dbGeo0 = Date.now();
@@ -357,7 +360,8 @@ export default async function handler(req, res) {
             last_location: geoLocation,
             lastIntent: 'find_nearby',
             lastUpdated: Date.now(),
-            last_restaurants_list: geoRestaurants
+            last_restaurants_list: geoRestaurants,
+            lastRestaurants: geoRestaurants
           });
         } else {
           updateSession(sessionId, {
@@ -1306,7 +1310,11 @@ export default async function handler(req, res) {
             const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
             const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
 
-            updateSession(sessionId, { last_menu: shortlist, lastRestaurant: selectedRestaurant, expectedContext: null });
+            updateSession(sessionId, {
+              last_menu: shortlist,
+              lastRestaurant: selectedRestaurant,
+              expectedContext: 'menu_or_order'
+            });
             replyCore = `Wybrano ${selectedRestaurant.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln || m.price || 0).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
           } catch (e) {
             updateSession(sessionId, { lastRestaurant: selectedRestaurant });
@@ -1350,9 +1358,11 @@ export default async function handler(req, res) {
 
         // 3) Fallback: jeśli brak numeru, spróbuj dopasować po nazwie
         // ALE NIE dla pojedynczych słów jak "burger" - tylko pełne nazwy restauracji
+        // (W trybie select_restaurant unikamy globalnego szukania - hybridSelection winno to załatwić)
         if (!chosen && parsed.restaurant && parsed.restaurant.length > 5) {
           const name = parsed.restaurant;
-          chosen = await findRestaurant(name);
+          // chosen = await findRestaurant(name); // Usuwamy globalny lookup w tym kontekście
+          console.log(`⚠️ skipping global findRestaurant fallback in select_restaurant mode for: ${name}`);
         }
 
         if (!chosen) {
@@ -1377,7 +1387,11 @@ export default async function handler(req, res) {
           const preferred = (menu || []).filter(m => !bannedCategories.some(b => String(m.category || '').toLowerCase().includes(b)));
           const shortlist = (preferred.length ? preferred : menu || []).slice(0, 6);
 
-          updateSession(sessionId, { last_menu: shortlist, lastRestaurant: chosen, expectedContext: null });
+          updateSession(sessionId, {
+            last_menu: shortlist,
+            lastRestaurant: chosen,
+            expectedContext: 'menu_or_order'
+          });
           replyCore = `Wybrano ${chosen.name}. W menu m.in.: ` + shortlist.map(m => `${m.name} (${Number(m.price_pln || m.price || 0).toFixed(2)} zł)`).join(", ") + ". Co zamawiasz?";
         } catch (e) {
           updateSession(sessionId, { lastRestaurant: chosen });
